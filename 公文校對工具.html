@@ -1,0 +1,2119 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 不連任何網路：所有處理都在這台電腦的瀏覽器裡完成，文件不會離開本機 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'">
+<title>公文校對工具</title>
+<style>
+  :root { --ink:#1a202c; --muted:#718096; --line:#e2e8f0; --brand:#2b6cb0; --ok:#2f855a; --warn:#c05621; }
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; color: var(--ink);
+         max-width: 1100px; margin: 0 auto; padding: 24px 20px 60px; background: #f7fafc; line-height: 1.6; }
+  h1 { font-size: 26px; margin: 8px 0 4px; }
+  h2 { font-size: 19px; margin: 26px 0 8px; }
+  .ver { font-size: 13px; color: var(--muted); font-weight: normal; margin-left: 8px; }
+  .hint { color: var(--muted); font-size: 14px; }
+  .privacy { background: #ebf8ff; border: 1px solid #bee3f8; border-radius: 6px; padding: 8px 12px; font-size: 14px; margin: 10px 0 18px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; margin: 12px 0; }
+  .drop { border: 2px dashed #a0aec0; border-radius: 10px; padding: 18px; text-align: center; background: #fff; transition: .15s; }
+  .drop.over { border-color: var(--brand); background: #ebf8ff; }
+  button { font: inherit; font-size: 15px; padding: 7px 16px; border-radius: 6px; border: 1px solid var(--brand);
+           background: var(--brand); color: #fff; cursor: pointer; margin: 4px 4px 4px 0; }
+  button.secondary { background: #fff; color: var(--brand); }
+  button.go { background: var(--ok); border-color: var(--ok); }
+  button:disabled { opacity: .5; cursor: default; }
+  .files { margin: 10px 0 0; font-size: 14px; max-height: 150px; overflow: auto; text-align: left; }
+  .files span { display: inline-block; background: #edf2f7; border-radius: 4px; padding: 1px 8px; margin: 2px; }
+  label.opt { margin-right: 14px; font-size: 15px; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; background: #fff; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; text-align: left; }
+  th { background: #edf2f7; }
+  .tag { display: inline-block; background: #e2e8f0; border-radius: 4px; padding: 0 7px; margin: 1px 4px 1px 0; font-size: 13px; }
+  .mark { color: #e53e3e; background: #fefcbf; padding: 0 2px; }
+  .ctx { color: var(--muted); font-size: 13px; }
+  .file-head { font-weight: bold; margin: 18px 0 4px; font-size: 16px; }
+  .warn { background: #fffaf0; border: 1px solid #f6ad55; border-radius: 6px; padding: 10px 14px; margin-top: 8px; }
+  .okline { color: var(--ok); }
+  .none { color: var(--ok); padding: 6px 12px; }
+  .err { color: #c53030; }
+  .progress { color: var(--brand); margin: 8px 0; min-height: 1.4em; }
+  details summary { cursor: pointer; color: var(--brand); }
+  textarea { width: 100%; min-height: 220px; font-family: Consolas, monospace; font-size: 13px; }
+  .toggles label { display: inline-block; min-width: 120px; margin: 2px 8px 2px 0; }
+  hr { margin: 36px 0 20px; border: none; border-top: 2px solid var(--line); }
+</style>
+</head>
+<body>
+<h1>公文校對工具<span class="ver">v2.0.1（網頁版）</span></h1>
+<div class="privacy">🔒 本工具不連網路：所有檢查與標註都在您的電腦上完成，文件不會上傳到任何地方。原檔完全不會被修改。</div>
+
+<div class="drop" id="drop">
+  <div>把公文<b>拖曳到這裡</b>（可一次多份），或</div>
+  <button class="secondary" id="pickFiles">選擇檔案</button>
+  <button class="secondary" id="pickFolder">選擇資料夾</button>
+  <input type="file" id="fileInput" multiple accept=".docx,.odt,.txt,.rtf" hidden>
+  <input type="file" id="folderInput" webkitdirectory hidden>
+  <div class="hint" id="folderHint"></div>
+  <div class="files" id="fileList"></div>
+</div>
+
+<div class="card">
+  <div>純文字檔（.txt／內容是純文字的 .rtf）標註時轉存為：
+    <label class="opt"><input type="radio" name="fmt" value="docx" checked> Word（.docx）</label>
+    <label class="opt"><input type="radio" name="fmt" value="odt"> ODF（.odt）</label>
+  </div>
+  <button id="checkBtn">① 檢查</button>
+  <span class="hint">只看結果，不會產生任何檔案。</span>
+</div>
+
+<div class="progress" id="progress"></div>
+<div id="result"></div>
+
+<div id="markBox" class="card" style="display:none">
+  <button class="go" id="markBtn">② 產出標註過的副本</button>
+  <span class="hint" id="markHint"></span>
+</div>
+<div id="markResult"></div>
+
+<hr>
+<h1>彙整核對</h1>
+<p class="hint">各單位交來的資料貼進彙整檔後，核對<b>有沒有漏貼或貼錯</b>。文號被改到一碼、數字打錯這種最難用眼睛發現的，會直接指出差在哪。
+  支援 Word（.docx）、ODF（.odt）、Excel（.xlsx）、簡報（.pptx）、純文字，彙整檔與來源檔可以是不同格式。</p>
+<div class="card">
+  <div><b>來源檔</b>（各單位交來的資料，可多份）：
+    <button class="secondary" id="cmpSrcBtn">選擇檔案</button>
+    <input type="file" id="cmpSrc" multiple accept=".docx,.odt,.xlsx,.pptx,.txt,.rtf" hidden>
+    <span class="hint" id="cmpSrcName">尚未選擇</span></div>
+  <div><b>彙整檔</b>（貼上後的那一份）：
+    <button class="secondary" id="cmpTgtBtn">選擇檔案</button>
+    <input type="file" id="cmpTgt" accept=".docx,.odt,.xlsx,.pptx,.txt,.rtf" hidden>
+    <span class="hint" id="cmpTgtName">尚未選擇</span></div>
+  <button class="go" id="cmpBtn">開始核對</button>
+  <span class="hint">只讀取、不修改任何檔案。</span>
+</div>
+<div id="cmpResult"></div>
+
+<hr>
+<h2>檢查項目與規則</h2>
+<div class="card" id="cfgBox">載入中…</div>
+
+<!-- 機關共用設定：由維護窗口把設定（JSON）貼在下面，隨這個檔案一起發布，所有人就會套用同一份字表。
+     個人在畫面上調整的設定會再疊加在這之上（存在各自的瀏覽器裡）。 -->
+<script type="application/json" id="org-config">{}</script>
+<script>
+// ===== zip.js =====
+// 讀寫 zip（docx / odt / xlsx / pptx 的外殼）。
+// 只用瀏覽器內建的 CompressionStream / DecompressionStream，不需要任何外部套件，
+// 因此整個工具可以是一個離線即可使用的 HTML 檔。
+(function (PT) {
+  "use strict";
+
+  const CRC_TABLE = (() => {
+    const t = new Uint32Array(256);
+    for (let n = 0; n < 256; n++) {
+      let c = n;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(bytes) {
+    let c = 0xffffffff;
+    for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  async function pipe(bytes, stream) {
+    const out = new Blob([bytes]).stream().pipeThrough(stream);
+    return new Uint8Array(await new Response(out).arrayBuffer());
+  }
+  const inflate = (b) => pipe(b, new DecompressionStream("deflate-raw"));
+  const deflate = (b) => pipe(b, new CompressionStream("deflate-raw"));
+
+  class ZipError extends Error {}
+
+  /** 讀 zip。回傳 { entries:[{name, method, time, date, extAttr}], read(name) → Uint8Array } */
+  function readZip(buf) {
+    const u8 = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new ZipError("不是 zip 格式");
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const entries = [];
+    const utf8 = new TextDecoder("utf-8");
+    for (let k = 0; k < count; k++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) throw new ZipError("zip 目錄損毀");
+      const flags = dv.getUint16(p + 8, true);
+      const e = {
+        flags,
+        method: dv.getUint16(p + 10, true),
+        time: dv.getUint16(p + 12, true),
+        date: dv.getUint16(p + 14, true),
+        csize: dv.getUint32(p + 20, true),
+        usize: dv.getUint32(p + 24, true),
+        extAttr: dv.getUint32(p + 38, true),
+        offset: dv.getUint32(p + 42, true),
+      };
+      const nl = dv.getUint16(p + 28, true), xl = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      e.name = utf8.decode(u8.subarray(p + 46, p + 46 + nl));
+      if (e.csize === 0xffffffff) throw new ZipError("檔案過大（ZIP64）不支援");
+      if (flags & 1) throw new ZipError("檔案已加密");
+      entries.push(e);
+      p += 46 + nl + xl + cl;
+    }
+    const byName = new Map(entries.map((e) => [e.name, e]));
+    async function read(name) {
+      const e = byName.get(name);
+      if (!e) return null;
+      if (dv.getUint32(e.offset, true) !== 0x04034b50) throw new ZipError("zip 內容損毀");
+      const start = e.offset + 30 + dv.getUint16(e.offset + 26, true) + dv.getUint16(e.offset + 28, true);
+      const raw = u8.subarray(start, start + e.csize);
+      if (e.method === 0) return raw.slice();
+      if (e.method === 8) return inflate(raw);
+      throw new ZipError(`不支援的壓縮方式 ${e.method}`);
+    }
+    return { entries, has: (n) => byName.has(n), read };
+  }
+
+  /** 寫 zip。files: [{name, data:Uint8Array, method(0 不壓縮 | 8 壓縮), time, date, extAttr}]，依陣列順序寫入。 */
+  async function writeZip(files) {
+    const enc = new TextEncoder();
+    const parts = [], central = [];
+    let offset = 0;
+    for (const f of files) {
+      const name = enc.encode(f.name);
+      const method = f.method === 0 ? 0 : 8;
+      const data = method === 0 ? f.data : await deflate(f.data);
+      const crc = crc32(f.data);
+      const now = dosTime(new Date());
+      const time = f.time ?? now.time, date = f.date ?? now.date;
+      const lh = new DataView(new ArrayBuffer(30));
+      lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint16(6, 0x0800, true);
+      lh.setUint16(8, method, true); lh.setUint16(10, time, true); lh.setUint16(12, date, true);
+      lh.setUint32(14, crc, true); lh.setUint32(18, data.length, true); lh.setUint32(22, f.data.length, true);
+      lh.setUint16(26, name.length, true); lh.setUint16(28, 0, true);
+      parts.push(new Uint8Array(lh.buffer), name, data);
+      const ch = new DataView(new ArrayBuffer(46));
+      ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+      ch.setUint16(8, 0x0800, true); ch.setUint16(10, method, true); ch.setUint16(12, time, true);
+      ch.setUint16(14, date, true); ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true);
+      ch.setUint32(24, f.data.length, true); ch.setUint16(28, name.length, true);
+      ch.setUint32(38, f.extAttr || 0, true); ch.setUint32(42, offset, true);
+      central.push(new Uint8Array(ch.buffer), name);
+      offset += 30 + name.length + data.length;
+    }
+    const csize = central.reduce((s, b) => s + b.length, 0);
+    const end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
+    end.setUint32(12, csize, true); end.setUint32(16, offset, true);
+    const all = [...parts, ...central, new Uint8Array(end.buffer)];
+    const out = new Uint8Array(all.reduce((s, b) => s + b.length, 0));
+    let i = 0;
+    for (const b of all) { out.set(b, i); i += b.length; }
+    return out;
+  }
+
+  function dosTime(d) {
+    return {
+      time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
+      date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(),
+    };
+  }
+
+  Object.assign(PT, { readZip, writeZip, crc32, ZipError });
+})(globalThis.PT = globalThis.PT || {});
+
+// ===== difflib.js =====
+// Python difflib.SequenceMatcher 的忠實移植（含 autojunk），讓彙整核對的相似度與差異說明
+// 和 Python 版完全一致。字串一律以「字」（Unicode 碼位）為單位。
+(function (PT) {
+  "use strict";
+
+  class SequenceMatcher {
+    constructor(a, b) {
+      this.a = Array.from(a);
+      this.b = Array.from(b);
+      this.matchingBlocks = null;
+      this.opcodes = null;
+      this.fullbcount = null;
+      this.chainB();
+    }
+
+    chainB() {
+      const b = this.b, b2j = new Map();
+      b.forEach((elt, i) => {
+        if (!b2j.has(elt)) b2j.set(elt, []);
+        b2j.get(elt).push(i);
+      });
+      this.bpopular = new Set();
+      const n = b.length;
+      if (n >= 200) {
+        const ntest = Math.floor(n / 100) + 1;
+        for (const [elt, idxs] of b2j) {
+          if (idxs.length > ntest) this.bpopular.add(elt);
+        }
+        for (const elt of this.bpopular) b2j.delete(elt);
+      }
+      this.b2j = b2j;
+    }
+
+    findLongestMatch(alo, ahi, blo, bhi) {
+      const a = this.a, b = this.b, b2j = this.b2j;
+      let besti = alo, bestj = blo, bestsize = 0;
+      let j2len = new Map();
+      for (let i = alo; i < ahi; i++) {
+        const newj2len = new Map();
+        for (const j of b2j.get(a[i]) || []) {
+          if (j < blo) continue;
+          if (j >= bhi) break;
+          const k = (j2len.get(j - 1) || 0) + 1;
+          newj2len.set(j, k);
+          if (k > bestsize) { besti = i - k + 1; bestj = j - k + 1; bestsize = k; }
+        }
+        j2len = newj2len;
+      }
+      // isjunk 為 None 時 bjunk 是空集合：Python 會沿著相同的字往前後延伸（含被 autojunk 排除的熱門字）
+      while (besti > alo && bestj > blo && a[besti - 1] === b[bestj - 1]) {
+        besti--; bestj--; bestsize++;
+      }
+      while (besti + bestsize < ahi && bestj + bestsize < bhi && a[besti + bestsize] === b[bestj + bestsize]) {
+        bestsize++;
+      }
+      return [besti, bestj, bestsize];
+    }
+
+    getMatchingBlocks() {
+      if (this.matchingBlocks) return this.matchingBlocks;
+      const la = this.a.length, lb = this.b.length;
+      const queue = [[0, la, 0, lb]], blocks = [];
+      while (queue.length) {
+        const [alo, ahi, blo, bhi] = queue.pop();
+        const [i, j, k] = this.findLongestMatch(alo, ahi, blo, bhi);
+        if (k) {
+          blocks.push([i, j, k]);
+          if (alo < i && blo < j) queue.push([alo, i, blo, j]);
+          if (i + k < ahi && j + k < bhi) queue.push([i + k, ahi, j + k, bhi]);
+        }
+      }
+      blocks.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);
+      let i1 = 0, j1 = 0, k1 = 0;
+      const nonAdj = [];
+      for (const [i2, j2, k2] of blocks) {
+        if (i1 + k1 === i2 && j1 + k1 === j2) k1 += k2;
+        else { if (k1) nonAdj.push([i1, j1, k1]); i1 = i2; j1 = j2; k1 = k2; }
+      }
+      if (k1) nonAdj.push([i1, j1, k1]);
+      nonAdj.push([la, lb, 0]);
+      return (this.matchingBlocks = nonAdj);
+    }
+
+    getOpcodes() {
+      if (this.opcodes) return this.opcodes;
+      let i = 0, j = 0;
+      const ops = [];
+      for (const [ai, bj, size] of this.getMatchingBlocks()) {
+        let tag = "";
+        if (i < ai && j < bj) tag = "replace";
+        else if (i < ai) tag = "delete";
+        else if (j < bj) tag = "insert";
+        if (tag) ops.push([tag, i, ai, j, bj]);
+        i = ai + size; j = bj + size;
+        if (size) ops.push(["equal", ai, i, bj, j]);
+      }
+      return (this.opcodes = ops);
+    }
+
+    ratio() {
+      const matches = this.getMatchingBlocks().reduce((s, t) => s + t[2], 0);
+      return calc(matches, this.a.length + this.b.length);
+    }
+
+    quickRatio() {
+      if (!this.fullbcount) {
+        this.fullbcount = new Map();
+        for (const e of this.b) this.fullbcount.set(e, (this.fullbcount.get(e) || 0) + 1);
+      }
+      const avail = new Map();
+      let matches = 0;
+      for (const e of this.a) {
+        const n = avail.has(e) ? avail.get(e) : this.fullbcount.get(e) || 0;
+        avail.set(e, n - 1);
+        if (n > 0) matches++;
+      }
+      return calc(matches, this.a.length + this.b.length);
+    }
+  }
+
+  function calc(matches, length) {
+    return length ? (2.0 * matches) / length : 1.0;
+  }
+
+  PT.SequenceMatcher = SequenceMatcher;
+})(globalThis.PT = globalThis.PT || {});
+
+// ===== rules.js =====
+// 公文校對規則：對一段文字找出可疑之處，回傳每一處的位置與說明。
+// 由 Python 版 proof_rules.py（v2.0.0）逐條移植，並以差異測試確認兩版結果完全一致。
+//
+// 設計原則：
+// - 只回報「有依據」的問題。沒把握的寧可不報——滿江紅的結果沒人會看。
+// - 每一條都附上理由，讓使用者自己判斷，不擅自認定對錯。
+// - 可調整的字表放在設定裡，機關習慣不同，程式不寫死。
+(function (PT) {
+  "use strict";
+
+  // Python 的 \d 也認得全形數字（１１５年），這裡明確寫出以維持一致。
+  // 注意 Python 版的前後界判斷寫的是 [0-9]（只有半形），這裡也照寫，兩版結果才會相同。
+  const D = "[0-9０-９]";
+  const toInt = (s) => parseInt(String(s).normalize("NFKC"), 10);
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\\/-]/g, "\\$&");
+  const WS_CHARS = " \t\r\n\f\v   -     　﻿";
+  const pyStrip = (s) => s.trim();
+  const byStartLong = (a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start);
+  const re = (src, flags = "") => new RegExp(src, "gu" + flags);
+
+  // ---------- 可調整的設定 ----------
+
+  const DEFAULT_CALC_WORDS = [
+    "總計", "合計", "共計", "小計", "累計", "總共", "總數", "總額", "共", "計",
+    "平均", "增加", "減少", "增為", "減為", "成長", "下降", "新增",
+    "扣除", "結餘", "餘額", "佔", "占", "比例", "比率", "折合", "相當",
+  ];
+  // 「計」前面若是主／會／設／審，那是機關名或別的詞（主計處、會計、設計、審計）
+  const CALC_LOOKBEHIND = { "計": "(?<![主會設審])" };
+
+  function calcPattern(words) {
+    const parts = words.map((w) => {
+      const gap = [...w].length === 1 ? 2 : 6;
+      return `${CALC_LOOKBEHIND[w] || ""}${esc(w)}[^0-9%]{0,${gap}}`;
+    });
+    return re(`(?:${parts.join("|")})([0-9][0-9,]*(?:\\.[0-9]+)?)`, "d");
+  }
+
+  const DEFAULT_TAI_EXCEPTIONS = [
+    "台端", "兄台", "台鑒", "台鑑", "台啟", "台照", "台安", "台甫", "台覽",
+    "台灣中油", "台灣電力", "台電", "台灣高速鐵路", "台灣高鐵", "台灣大哥大",
+    "台灣糖業", "台糖", "台灣自來水", "台水", "台新", "台北富邦", "台塑", "台泥",
+    "台積電", "台灣積體電路", "台達電", "台灣之星",
+  ];
+
+  const DEFAULT_CONFIG = {
+    "疊字白名單": [
+      "漸漸", "常常", "慢慢", "剛剛", "偶偶", "微微", "深深", "淺淺", "緩緩",
+      "紛紛", "頻頻", "屢屢", "一一", "個個", "件件", "處處", "人人", "年年",
+      "月月", "天天", "日日", "時時", "刻刻", "往往", "僅僅", "稍稍", "略略",
+      "剛好", "多多", "少少", "好好", "早早", "遲遲", "默默", "悄悄", "匆匆",
+      "區區", "種種", "各各", "重重", "層層", "步步", "節節", "面面", "點點",
+      "滴滴", "絲絲", "陣陣", "串串", "條條", "道道", "樣樣", "事事", "物物",
+    ],
+    // 錯誤寫法 → 建議寫法。刻意只放「幾乎可確定是誤用」的少數幾條。
+    "常見錯別字": {
+      "登陸系統": "登錄系統", "登陸資料": "登錄資料", "帳號登陸": "帳號登錄",
+      "計劃書": "計畫書", "需知": "須知", "佔用": "占用", "佔比": "占比", "佔有": "占有",
+      "公佈": "公布", "發佈": "發布", "宣佈": "宣布", "頒佈": "頒布", "分佈": "分布",
+      "佈告": "布告", "按裝": "安裝", "渡假": "度假", "其它": "其他", "裏面": "裡面",
+    },
+    // 這些字常同時出現在詞尾與詞首，重複時多半是兩個詞相接而非打錯
+    "詞界常見字": [
+      "文", "案", "會", "市", "本", "選", "局", "處", "管", "科", "室", "組",
+      "課", "隊", "部", "署", "院", "所", "心", "務", "政", "法", "業", "行",
+      "理", "件", "表", "單", "位", "員", "人", "長", "區", "字", "號", "期",
+      "度", "點", "中", "請", "查", "核", "報", "作", "用", "式", "面",
+    ],
+    "公文用語": {},
+    "計算關鍵字": DEFAULT_CALC_WORDS,
+    "台字例外": [],
+    "檢查項目": {
+      "全半形": true, "層次標號": true, "半形括號": true, "星期": true, "金額大寫": true,
+      "數字用法": true, "日期": true, "日期標註": true, "重複與空白": true, "錯別字": true,
+      "公文用語": true, "一致性": true, "計算數字": true, "數字驗算": true,
+    },
+  };
+
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const isObj = (v) => v && typeof v === "object" && !Array.isArray(v);
+
+  /** 使用者設定與內建預設逐項合併（同 Python load_config）。 */
+  // base：要疊加在哪一份之上（預設為內建設定）。網頁版依序疊加：內建 → 機關共用設定 → 個人設定。
+  function mergeConfig(user, base = DEFAULT_CONFIG) {
+    if (!isObj(user)) return clone(base);
+    const merged = {};
+    for (const [key, def] of Object.entries(base)) {
+      const u = user[key];
+      if (isObj(def) && isObj(u)) {
+        const d = Object.assign(clone(def), u);
+        merged[key] = Object.fromEntries(
+          Object.entries(d).filter(([, v]) => v !== "" || key !== "常見錯別字"));
+      } else if (Array.isArray(def) && Array.isArray(u)) {
+        merged[key] = [...new Set([...def, ...u])];
+      } else {
+        merged[key] = u !== undefined && u !== null ? u : clone(def);
+      }
+    }
+    for (const [k, v] of Object.entries(user)) if (!(k in merged)) merged[k] = v;
+    return merged;
+  }
+
+  // ---------- 字元判別 ----------
+
+  const FULL_ALNUM = re("[Ａ-Ｚａ-ｚ０-９]");
+  const HALF_PUNCT_IN_CJK = re("(?<=[一-鿿])\\s*([,;:!?])\\s*(?=[一-鿿])", "d");
+  const HALF_PAREN_CJK = re("\\((?=[^)]*[一-鿿])[^)]*\\)");
+
+  // ---------- 分項標號（臺北市政府文書處理手冊附件3）----------
+  // 「分項標號，應另列縮格以全形書寫。"()"以半形為之。」：一、／(一)／１、／(１)
+
+  const OUTLINE = new RegExp(
+    "^\\s*(?:(?<l2>[\\(（](?<n2>[一二三四五六七八九十]+)[\\)）])" +
+    "|(?<l3>(?<n3>" + D + "+)、)" +
+    "|(?<l4>[\\(（](?<n4>" + D + "+)[\\)）]))", "du");
+  const OUTLINE_SOURCE = '臺北市政府文書處理手冊附件3：分項標號以全形書寫、"()"以半形為之';
+  const toFullDigits = (s) => s.replace(/[0-9]/g, (c) => String.fromCharCode(c.charCodeAt(0) + 0xfee0));
+
+  function outlineMatch(text) {
+    const m = OUTLINE.exec(text);
+    if (!m) return null;
+    const g = ["l2", "l3", "l4"].find((k) => m.groups[k] !== undefined);
+    return { m, g, span: m.indices.groups[g] };
+  }
+
+  function outlineSpan(text) {
+    const o = outlineMatch(text);
+    return o ? o.span : null;
+  }
+
+  function checkOutline(text) {
+    const o = outlineMatch(text);
+    if (!o) return [];
+    const { m, g, span } = o;
+    let want, level;
+    if (g === "l2") { want = `(${m.groups.n2})`; level = "第二層"; }
+    else if (g === "l3") { want = `${toFullDigits(m.groups.n3)}、`; level = "第三層"; }
+    else { want = `(${toFullDigits(m.groups.n4)})`; level = "第四層"; }
+    const got = m.groups[g];
+    if (got === want) return [];
+    return [{ type: "層次標號", start: span[0], end: span[1], text: got, suggest: want,
+              reason: `分項標號${level}應寫作「${want}」（${OUTLINE_SOURCE}）` }];
+  }
+
+  // ---------- 各項規則 ----------
+
+  function checkFullwidth(text) {
+    const out = [], skip = outlineSpan(text);
+    for (const m of text.matchAll(FULL_ALNUM)) {
+      if (skip && skip[0] <= m.index && m.index < skip[1]) continue;
+      const half = m[0].normalize("NFKC");
+      out.push({ type: "全半形", start: m.index, end: m.index + m[0].length, text: m[0],
+                 suggest: half, reason: `全形「${m[0]}」建議改為半形「${half}」` });
+    }
+    return out;
+  }
+
+  function checkHalfPunct(text) {
+    const table = { ",": "，", ";": "；", ":": "：", "!": "！", "?": "？" };
+    const out = [];
+    for (const m of text.matchAll(HALF_PUNCT_IN_CJK)) {
+      const ch = m[1], [a, b] = m.indices[1];
+      out.push({ type: "全半形", start: a, end: b, text: ch, suggest: table[ch] || ch,
+                 reason: `中文文句中的半形「${ch}」建議改為全形「${table[ch] || ch}」` });
+    }
+    return out;
+  }
+
+  function checkHalfParen(text) {
+    const out = [], skip = outlineSpan(text);
+    for (const m of text.matchAll(HALF_PAREN_CJK)) {
+      if (skip && skip[0] <= m.index && m.index < skip[1]) continue;
+      out.push({ type: "半形括號", start: m.index, end: m.index + m[0].length, text: m[0],
+                 suggest: "（" + m[0].slice(1, -1) + "）",
+                 reason: "括號內含中文，依文書處理手冊建議使用全形括號（）" });
+    }
+    return out;
+  }
+
+  function checkRepeat(text, whitelist, boundary) {
+    const out = [];
+    for (const m of text.matchAll(re("([一-鿿])\\1"))) {
+      if (whitelist.has(m[0]) || boundary.has(m[1])) continue;
+      out.push({ type: "重複字", start: m.index, end: m.index + 2, text: m[0], suggest: m[1],
+                 reason: `「${m[0]}」疑似重複輸入（若是正常疊字詞，可加入白名單）` });
+    }
+    return out;
+  }
+
+  // 公文格式本來就會用全形空白（欄位對齊、挪抬），不是多餘的
+  const SPACING_EXEMPT = re(
+    "檔\\s*號|保\\s*存\\s*年\\s*限|速\\s*別|密\\s*等|附\\s*件|受\\s*文\\s*者|" +
+    "發\\s*文\\s*字\\s*號|發\\s*文\\s*日\\s*期|解\\s*密\\s*條\\s*件|" +
+    "(?:敬陳|此致|此上|謹陳|陳)\\s*[鈞貴大市局處會部院]");
+
+  function looksLikeHeading(text) {
+    const t = pyStrip(text);
+    return [...t].length <= 20 && !/[，。；：、！？]/u.test(t);
+  }
+
+  function checkSpacing(text) {
+    const out = [];
+    if (looksLikeHeading(text)) return out;
+    const exempt = [...text.matchAll(SPACING_EXEMPT)].map((m) => [m.index, m.index + m[0].length]);
+    for (const m of text.matchAll(re("(?<=[一-鿿])(\\s+)(?=[一-鿿])"))) {
+      if (exempt.some(([a, b]) => a <= m.index && m.index < b)) continue;
+      out.push({ type: "空白", start: m.index, end: m.index + m[0].length, text: m[0], suggest: "",
+                 reason: "中文字之間出現空白，可能是多餘的" });
+    }
+    for (const m of text.matchAll(re("([，。；：、！？])\\1+"))) {
+      out.push({ type: "標點", start: m.index, end: m.index + m[0].length, text: m[0], suggest: m[1],
+                 reason: `連續標點「${m[0]}」` });
+    }
+    return out;
+  }
+
+  // ---------- 數字與日期 ----------
+
+  const ORDINAL_MISUSE = [[re("([0-9]+)分之([0-9]+)"), "分數屬慣用語，應使用國字（如三分之一）"]];
+  const ROC_DATE = re(`(?<![0-9])(${D}{2,3})\\s*年\\s*(${D}{1,2})\\s*月\\s*(${D}{1,2})\\s*日`);
+  const ROC_YM = re(`(?<![0-9])(${D}{2,3})\\s*年\\s*(${D}{1,2})\\s*月(?!\\s*${D}{1,2}\\s*日)`);
+  const SLASH_DATE = re(`(?<![0-9/])(${D}{2,3})/(${D}{1,2})/(${D}{1,2})(?![0-9/])`);
+  const DOT_DATE = re(`(?<![0-9.])(${D}{2,3})\\.(${D}{1,2})\\.(${D}{1,2})(?![0-9.])`);
+  const DAYS_IN_MONTH = [0, 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  const isLeap = (y) => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0);
+
+  function checkNumbers(text) {
+    const out = [];
+    for (const [pat, why] of ORDINAL_MISUSE) {
+      for (const m of text.matchAll(pat)) {
+        out.push({ type: "數字用法", start: m.index, end: m.index + m[0].length, text: m[0], suggest: "",
+                   reason: `${why}（公文書橫式書寫數字使用原則）：「${m[0]}」` });
+      }
+    }
+    return out;
+  }
+
+  function badDate(y, mth, d = null) {
+    if (!(1 <= mth && mth <= 12)) return `月份「${mth}」不在 1-12 範圍`;
+    if (y < 1 || y > 200) return `民國年「${y}」超出合理範圍`;
+    if (d !== null) {
+      if (d < 1 || d > 31) return `日期「${d}」不在 1-31 範圍`;
+      if (d > DAYS_IN_MONTH[mth]) return `${mth} 月沒有 ${d} 日`;
+      if (mth === 2 && d === 29 && !isLeap(y + 1911))
+        return `民國${y}年（${y + 1911}年）不是閏年，2 月沒有 29 日`;
+    }
+    return null;
+  }
+
+  function checkDates(text) {
+    const out = [];
+    const add = (m, why) => out.push({ type: "日期", start: m.index, end: m.index + m[0].length,
+                                       text: m[0], suggest: "", reason: `日期可能有誤——${why}` });
+    for (const pat of [ROC_DATE, SLASH_DATE, DOT_DATE]) {
+      for (const m of text.matchAll(pat)) {
+        const why = badDate(toInt(m[1]), toInt(m[2]), toInt(m[3]));
+        if (why) add(m, why);
+      }
+    }
+    for (const m of text.matchAll(ROC_YM)) {
+      const why = badDate(toInt(m[1]), toInt(m[2]));
+      if (why) add(m, why);
+    }
+    return out;
+  }
+
+  const count = (pat, s) => [...s.matchAll(pat)].length;
+
+  function checkDateStyle(full) {
+    const styles = [["民國年月日（114年10月1日）", count(ROC_DATE, full)],
+                    ["斜線（114/10/01）", count(SLASH_DATE, full)],
+                    ["點號（114.10.01）", count(DOT_DATE, full)]].filter(([, v]) => v);
+    if (styles.length > 1) {
+      const detail = styles.map(([k, v]) => `${k} ${v} 處`).join("、");
+      return [{ type: "日期格式", scope: "全文",
+                reason: `全文混用了 ${styles.length} 種日期寫法：${detail}。建議統一。` }];
+    }
+    return [];
+  }
+
+  const DATE_MARKS = [
+    re(`(?<![0-9])${D}{2,4}\\s*年\\s*${D}{1,2}\\s*月\\s*${D}{1,2}\\s*日`),
+    re(`(?<![0-9])${D}{2,4}\\s*年\\s*${D}{1,2}\\s*月(?!\\s*${D}{1,2}\\s*日)`),
+    re(`(?<![0-9年])${D}{1,2}\\s*月\\s*${D}{1,2}\\s*日`),
+    re(`(?<![0-9/])${D}{2,4}/${D}{1,2}/${D}{1,2}(?![0-9/])`),
+    re(`(?<![0-9.])${D}{2,4}\\.${D}{1,2}\\.${D}{1,2}(?![0-9.])`),
+  ];
+
+  function checkDateMarks(text) {
+    const out = [], seen = [];
+    for (const pat of DATE_MARKS) {
+      for (const m of text.matchAll(pat)) {
+        const a = m.index, b = a + m[0].length;
+        if (seen.some(([x, y]) => x <= a && b <= y)) continue;
+        seen.push([a, b]);
+        out.push({ type: "日期", start: a, end: b, text: m[0], suggest: "", reason: "日期，建議複查是否正確" });
+      }
+    }
+    return out.sort((x, y) => x.start - y.start);
+  }
+
+  function checkTable(text, table, type, label) {
+    const out = [];
+    for (const [wrong, right] of Object.entries(table || {})) {
+      if (!wrong) continue;
+      for (const m of text.matchAll(re(esc(wrong)))) {
+        out.push({ type, start: m.index, end: m.index + m[0].length, text: wrong, suggest: right,
+                   reason: `${label}「${wrong}」建議寫成「${right}」` });
+      }
+    }
+    return out;
+  }
+
+  // ---------- 公文用語（依文書處理手冊「公文用語表」）----------
+  // 檢查的是「文內是否自相矛盾」。「貴」同時用於平行與下級，不納入判斷；
+  // 「該」是間接稱謂，各方向通用，也不納入。
+
+  const TERM_LEVELS = {
+    "上級": {
+      "稱謂": ["鈞部", "鈞府", "鈞會", "鈞局", "鈞處", "鈞長", "鈞院", "大部", "大院", "大會"],
+      "期望": ["請鑒核", "請核示", "請釋示", "請鑒察", "請核備", "請核轉", "敬請鑒核", "陳請鑒核"],
+      "引敘": ["奉"],
+    },
+    "平行": {
+      "稱謂": [],
+      "期望": ["請查照", "請察照", "請查照辦理", "請查明見復", "請同意見復", "請查照見復", "請惠允見復"],
+      "引敘": ["准"],
+    },
+    "下級": {
+      "稱謂": [],
+      "期望": ["請照辦", "請辦理見復", "請轉行照辦", "請切實辦理", "希照辦", "請依規定辦理見復"],
+      "引敘": ["據"],
+    },
+  };
+  const QUOTE_EXCLUDE = {
+    "據": ["統計", "了解", "瞭解", "悉", "報導", "指出", "調查", "估計", "稱", "說",
+           "此", "以", "實", "查", "點", "傳", "聞"],
+    "准": ["予", "許", "駁", "此"],
+    "奉": [],
+  };
+
+  function checkOfficialTerms(full) {
+    const hits = {};
+    for (const [level, groups] of Object.entries(TERM_LEVELS)) {
+      for (const [kind, words] of Object.entries(groups)) {
+        for (const w of words) {
+          let found;
+          if (kind === "引敘") {
+            const excl = (QUOTE_EXCLUDE[w] || []).map(esc).join("|");
+            const neg = excl ? `(?!${excl})` : "";
+            found = new RegExp(`(?:^|[。；：\\n])\\s*${esc(w)}${neg}(?=[\\p{L}\\p{Nl}\\p{No}])`, "u").test(full);
+          } else {
+            found = full.includes(w);
+          }
+          if (found) (hits[level] = hits[level] || []).push(`${kind}語「${w}」`);
+        }
+      }
+    }
+    const levels = Object.entries(hits);
+    if (levels.length < 2) return [];
+    const detail = levels.map(([lv, v]) => `${lv}用語（${v.slice(0, 3).join("、")}）`).join("；");
+    return [{ type: "公文用語", scope: "全文",
+              reason: `文中同時出現 ${levels.length} 種層級的用語：${detail}。` +
+                      "請確認是否符合本件的收文對象（若文中確有引敘他級來文則屬正常）。" }];
+  }
+
+  // ---------- 標準字體：臺 ----------
+
+  function checkStandardChar(text, exceptions) {
+    exceptions = exceptions && exceptions.length ? exceptions : DEFAULT_TAI_EXCEPTIONS;
+    if (!text.includes("台")) return [];
+    const covered = new Set();
+    for (const e of exceptions) {
+      if (!e.includes("台")) continue;
+      for (const m of text.matchAll(re(esc(e)))) {
+        for (let i = m.index; i < m.index + m[0].length; i++) covered.add(i);
+      }
+    }
+    const out = [];
+    for (const m of text.matchAll(/台/gu)) {
+      if (covered.has(m.index)) continue;
+      const word = text.slice(Math.max(0, m.index - 1), m.index + 2);
+      out.push({ type: "標準字體", start: m.index, end: m.index + 1, text: "台", suggest: "臺",
+                 reason: `公文書標準字體應作「臺」（「${word}」）。若屬法定名稱用「台」者，可加入設定檔「台字例外」` });
+    }
+    return out;
+  }
+
+  // ---------- 全文一致性比對 ----------
+
+  const EN_WORD = re("[A-Za-z][A-Za-z0-9]*(?:[-.'][A-Za-z0-9]+)*");
+  const NUM_UNIT = "(?:件|人|次|案|元|個|筆|戶|家|種|項|台|輛|份|張|頁|名|組|條|冊)";
+  const NUM_GROUPED = re(`(?<![0-9,])([0-9]{1,3}(?:,[0-9]{3})+)(?=${NUM_UNIT})`);
+  const NUM_PLAIN = re(`(?<![0-9,.A-Za-z])([0-9]{4,})(?=${NUM_UNIT})`);
+
+  function checkEnConsistency(full) {
+    const groups = new Map();
+    for (const m of full.matchAll(EN_WORD)) {
+      const w = m[0];
+      if (w.length < 2) continue;
+      const key = w.replace(/[-.']/g, "").toLowerCase();
+      if (!groups.has(key)) groups.set(key, new Map());
+      const g = groups.get(key);
+      g.set(w, (g.get(w) || 0) + 1);
+    }
+    const out = [];
+    for (const [key, variants] of groups) {
+      if (variants.size < 2) continue;
+      const detail = [...variants].sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v}（${n} 次）`).join("、");
+      out.push({ type: "英文一致性", scope: "全文",
+                 reason: `英文「${key}」在文中有 ${variants.size} 種寫法：${detail}。建議統一。` });
+    }
+    return out;
+  }
+
+  function checkNumberConsistency(full) {
+    const grouped = [...full.matchAll(NUM_GROUPED)].map((m) => m[1]);
+    const plain = [...full.matchAll(NUM_PLAIN)].map((m) => m[1]);
+    if (grouped.length && plain.length) {
+      return [{ type: "數字一致性", scope: "全文",
+                reason: `數量的千分位寫法不一致：有加逗號的 ${grouped.length} 處（如 ${grouped[0]}），` +
+                        `也有未加的 ${plain.length} 處（如 ${plain[0]}）。建議統一。` }];
+    }
+    return [];
+  }
+
+  function checkPercentConsistency(full) {
+    const half = count(re("[0-9]\\s*%"), full), fw = count(re("[0-9]\\s*％"), full);
+    if (half && fw) {
+      return [{ type: "百分號", scope: "全文",
+                reason: `百分號全半形混用：半形 % 有 ${half} 處、全形 ％ 有 ${fw} 處。建議統一。` }];
+    }
+    return [];
+  }
+
+  function checkCjkEnSpacing(full) {
+    const withSp = count(re("[一-鿿]\\s[A-Za-z]|[A-Za-z]\\s[一-鿿]"), full);
+    const without = count(re("[一-鿿][A-Za-z]|[A-Za-z][一-鿿]"), full);
+    if (withSp && without && Math.min(withSp, without) >= 2) {
+      return [{ type: "中英間距", scope: "全文",
+                reason: `中英文之間的空白不一致：有空白 ${withSp} 處、無空白 ${without} 處。` +
+                        "建議統一（公文慣例多為不加空白）。" }];
+    }
+    return [];
+  }
+
+  // ---------- 計算而來的數字 ----------
+
+  const PERCENT = re("([0-9][0-9,]*(?:\\.[0-9]+)?\\s*%)|百分之([0-9]+)");
+  const CALC_NEAR = calcPattern(DEFAULT_CALC_WORDS);
+
+  function checkCalculatedNumbers(text, words) {
+    const pat = words && words.length ? calcPattern(words) : CALC_NEAR;
+    const out = [], seen = new Set();
+    const add = (a, b, why) => {
+      const k = a + "," + b;
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push({ type: "計算數字", start: a, end: b, text: text.slice(a, b), suggest: "",
+                 reason: `${why}，建議複查是否正確` });
+    };
+    for (const m of text.matchAll(pat)) {
+      const [a, b] = m.indices[1];
+      add(a, b, `「${pyStrip(m[0].slice(0, a - m.index))}」後的數字`);
+    }
+    for (const m of text.matchAll(PERCENT)) add(m.index, m.index + m[0].length, "百分比");
+    out.sort(byStartLong);
+    const kept = [];
+    for (const f of out) {
+      if (kept.length && f.start < kept[kept.length - 1].end) continue;
+      kept.push(f);
+    }
+    return kept;
+  }
+
+  // ---------- 數字驗算 ----------
+
+  const SUM_TOTAL = re("共\\s*([0-9][0-9,]*)\\s*([人次件案元個])");
+  const SUM_ITEM = re("共\\s*([0-9][0-9,]*)\\s*([人次件案元個])");
+  const DIFF_PAT = re("([0-9][0-9,]*)\\s*([人次件案元個]).{0,60}?較.{0,40}?([0-9][0-9,]*)\\s*\\2" +
+                      ".{0,40}?(增加|減少)[^0-9]{0,10}([0-9][0-9,]*)\\s*\\2", "s");
+  const n = (s) => parseInt(s.replace(/,/g, ""), 10);
+
+  function checkArithmetic(full) {
+    const out = [];
+    let checked = 0;
+    for (const m of full.matchAll(SUM_TOTAL)) {
+      const total = n(m[1]), unit = m[2], end = m.index + m[0].length;
+      let after = full.slice(end, end + 320);
+      const stops = [after.indexOf("\n"), after.indexOf("。")].filter((i) => i >= 0);
+      if (stops.length) after = after.slice(0, Math.min(...stops));
+      const pos = after.indexOf("其中");
+      if (pos < 0 || pos > 30) continue;
+      const parts = [...after.slice(pos).matchAll(SUM_ITEM)].filter((x) => x[2] === unit).map((x) => n(x[1]));
+      if (parts.length < 2) continue;
+      checked++;
+      const sum = parts.reduce((s, x) => s + x, 0);
+      if (sum !== total) {
+        out.push({ type: "數字驗算", scope: "全文",
+                   reason: `加總對不上：「共${m[1]}${unit}」但其中各項為 ${parts.join("＋")}＝${sum}${unit}` +
+                           `，相差 ${Math.abs(sum - total)}${unit}。請確認。` });
+      }
+    }
+    for (const m of full.matchAll(DIFF_PAT)) {
+      const now = n(m[1]), unit = m[2], before = n(m[3]), word = m[4], diff = n(m[5]);
+      checked++;
+      const actual = word === "增加" ? now - before : before - now;
+      if (actual !== diff) {
+        out.push({ type: "數字驗算", scope: "全文",
+                   reason: `增減數對不上：${now}${unit} 與 ${before}${unit} 相差 ${Math.abs(actual)}${unit}，` +
+                           `但文中寫「${word}${m[5]}${unit}」。請確認。` });
+      }
+    }
+    if (checked && !out.length) {
+      out.push({ type: "數字驗算", scope: "全文", ok: true,
+                 reason: `僅 ${checked} 組數字符合可驗算句型（共N…其中…共A、共B／較…增加、減少），` +
+                         "這幾組計算相符；其餘數字未驗算，仍請自行複查。" });
+    }
+    return out;
+  }
+
+  // ---------- 日期與星期是否相符 ----------
+
+  const WEEKDAY_CHARS = "一二三四五六日";
+  const SP = "[ \\t\\u3000]*";
+  const WD = `(?<wd>[（(]${SP}(?:星期|週|周|禮拜)?${SP}[一二三四五六日天]${SP}[）)]|(?:星期|週|周|禮拜)[一二三四五六日天])`;
+  const WEEKDAY_DATES = [
+    re(`(?<![0-9])(?:(?<y>${D}{2,4})\\s*年\\s*)?(?<m>${D}{1,2})\\s*月\\s*(?<d>${D}{1,2})\\s*日${SP}${WD}`, "d"),
+    re(`(?<![0-9/])(?<y>${D}{2,4})/(?<m>${D}{1,2})/(?<d>${D}{1,2})${SP}${WD}`, "d"),
+    re(`(?<![0-9.])(?<y>${D}{2,4})\\.(?<m>${D}{1,2})\\.(?<d>${D}{1,2})${SP}${WD}`, "d"),
+  ];
+  const WD_CORE = /(星期|週|周|禮拜)?([一二三四五六日天])/u;
+
+  function inferDocYear(full) {
+    const years = [];
+    for (const m of full.matchAll(re(`(?<![0-9])(${D}{2,3})\\s*年\\s*${D}{1,2}\\s*月`))) years.push(toInt(m[1]));
+    for (const m of full.matchAll(re(`(?<![0-9/])(${D}{2,3})/${D}{1,2}/${D}{1,2}(?![0-9/])`))) years.push(toInt(m[1]));
+    const ys = years.filter((y) => y >= 1 && y <= 200);
+    if (!ys.length) return null;
+    const cnt = new Map();
+    ys.forEach((y) => cnt.set(y, (cnt.get(y) || 0) + 1));
+    // 次數相同時取較晚的年份（與 Python 版一致）
+    return [...cnt].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0][0];
+  }
+
+  const toAd = (y) => (y <= 200 ? y + 1911 : y);
+  const pad = (x, k) => String(x).padStart(k, "0");
+
+  function makeDate(y, mo, d) {
+    if (y < 1 || y > 9999) return null;
+    const dt = new Date(Date.UTC(2000, mo - 1, d));
+    dt.setUTCFullYear(y);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return dt;
+  }
+
+  function checkWeekdays(text, docYear = null) {
+    const out = [], seen = new Set();
+    let checked = 0;
+    for (const pat of WEEKDAY_DATES) {
+      for (const m of text.matchAll(pat)) {
+        const wdStart = m.indices.groups.wd[0];
+        if (seen.has(wdStart)) continue;
+        const y = m.groups.y !== undefined ? toInt(m.groups.y) : docYear;
+        if (!y) continue;
+        const ad = toAd(y), mo = toInt(m.groups.m), d = toInt(m.groups.d);
+        const date = makeDate(ad, mo, d);
+        if (!date) continue;
+        seen.add(wdStart);
+        checked++;
+        const core = WD_CORE.exec(m.groups.wd);
+        const a = wdStart + core.index, b = a + core[0].length;
+        const written = core[2].replace("天", "日");
+        const actual = WEEKDAY_CHARS[(date.getUTCDay() + 6) % 7];
+        if (written === actual) continue;
+        const prefix = core[1] || "";
+        const right = core[2] === "天" && actual === "日" ? "天" : actual;
+        const head = pyStrip(m[0].slice(0, wdStart - m.index));
+        out.push({ type: "星期", start: a, end: b, text: core[0], suggest: prefix + right,
+                   reason: `${head} 是星期${actual}（${pad(ad, 4)}-${pad(mo, 2)}-${pad(d, 2)}），文中寫「${core[0]}」` +
+                           (m.groups.y !== undefined ? "" : `（年份依全文推定為${y}年）`) });
+      }
+    }
+    return [out, checked];
+  }
+
+  // ---------- 國字大寫金額與阿拉伯數字是否一致 ----------
+
+  const CN_DIGIT = { "零": 0, "〇": 0, "○": 0, "壹": 1, "一": 1, "貳": 2, "貮": 2, "二": 2, "兩": 2,
+    "參": 3, "叁": 3, "三": 3, "肆": 4, "四": 4, "伍": 5, "五": 5, "陸": 6, "六": 6,
+    "柒": 7, "七": 7, "捌": 8, "八": 8, "玖": 9, "九": 9 };
+  const CN_UNIT = { "拾": 10, "十": 10, "佰": 100, "百": 100, "仟": 1000, "千": 1000 };
+  const CN_NUM = "零〇○壹一貳貮二兩參叁三肆四伍五陸六柒七捌八玖九拾十佰百仟千萬億";
+  const CN_DIGITS_ONLY = [...CN_NUM].slice(0, -8).join("");
+  const CN_AMOUNT = re(`(?<int>[${CN_NUM}]+)[元圓](?:(?<jiao>[${CN_DIGITS_ONLY}])角)?(?:(?<fen>[${CN_DIGITS_ONLY}])分)?整?`);
+  const UPPER = new Set("壹貳貮參叁肆伍陸柒捌玖拾佰仟");
+  const AR = "(?<num>[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\\.(?<dec>[0-9]{1,2}))?\\s*(?<big>萬|億)?";
+  const CUR = "(?:新臺幣|新台幣|NT\\$|NTD|＄|\\$)?";
+  const AR_AFTER = new RegExp(`\\s*[（(]\\s*${CUR}\\s*${AR}\\s*(?:元|圓)?\\s*整?\\s*[）)]`, "uy");
+  const AR_BEFORE = new RegExp(`${CUR}\\s*${AR}\\s*(?:元|圓)\\s*[（(]\\s*$`, "u");
+
+  /** 國字金額（不含「元」）轉整數（BigInt）；寫法無法確定時回 null。 */
+  function cnAmountToInt(s) {
+    let total = 0n, section = 0n, num = 0n, pending = false;
+    for (const ch of s) {
+      if (ch in CN_DIGIT) {
+        const v = BigInt(CN_DIGIT[ch]);
+        if (pending && v !== 0n && num !== 0n) return null;
+        num = v; pending = true;
+      } else if (ch in CN_UNIT) {
+        section += (pending ? num : 1n) * BigInt(CN_UNIT[ch]);
+        num = 0n; pending = false;
+      } else if (ch === "萬") {
+        total += (section + num) * 10000n;
+        section = 0n; num = 0n; pending = false;
+      } else if (ch === "億") {
+        total = (total + section + num) * 100000000n;
+        section = 0n; num = 0n; pending = false;
+      } else return null;
+    }
+    return total + section + num;
+  }
+
+  function fmtMoney(fen) {
+    const yuan = fen / 100n, rest = fen % 100n;
+    const s = yuan.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    return s + (rest ? ("." + pad(rest, 2)).replace(/0+$/, "") : "");
+  }
+
+  const stripChars = (s, chars) => {
+    let a = 0, b = s.length;
+    while (a < b && chars.includes(s[a])) a++;
+    while (b > a && chars.includes(s[b - 1])) b--;
+    return s.slice(a, b);
+  };
+
+  function checkAmounts(text) {
+    const out = [];
+    let checked = 0;
+    for (const m of text.matchAll(CN_AMOUNT)) {
+      if (![...m.groups.int].some((c) => UPPER.has(c))) continue;
+      const yuan = cnAmountToInt(m.groups.int);
+      if (yuan === null) continue;
+      let cn = yuan * 100n;
+      if (m.groups.jiao) cn += BigInt(CN_DIGIT[m.groups.jiao] || 0) * 10n;
+      if (m.groups.fen) cn += BigInt(CN_DIGIT[m.groups.fen] || 0);
+      const end = m.index + m[0].length;
+      AR_AFTER.lastIndex = end;
+      let ar = AR_AFTER.exec(text);
+      if (!ar) {
+        const before = AR_BEFORE.exec(text.slice(Math.max(0, m.index - 40), m.index));
+        const closes = /^\s*[）)]/u.test(text.slice(end));
+        ar = before && closes ? before : null;
+      }
+      if (!ar) continue;
+      let val = BigInt(ar.groups.num.replace(/,/g, "")) * 100n;
+      if (ar.groups.dec) val += BigInt(ar.groups.dec.padEnd(2, "0"));
+      if (ar.groups.big) val *= ar.groups.big === "萬" ? 10000n : 100000000n;
+      checked++;
+      if (val === cn) continue;
+      const raw = stripChars(ar[0], " （()）");
+      out.push({ type: "金額大寫", start: m.index, end, text: m[0], suggest: "",
+                 reason: `國字大寫「${m[0]}」＝${fmtMoney(cn)}元，但並列的阿拉伯數字「${raw}」＝${fmtMoney(val)}元，兩者不一致` });
+    }
+    return [out, checked];
+  }
+
+  function summary(kind, what, [bad, checked]) {
+    if (!checked) return [];
+    if (bad.length) {
+      return [{ type: kind, scope: "全文", reason: `核對 ${checked} 組${what}，其中 ${bad.length} 組不一致（已在文中標註）。` }];
+    }
+    return [{ type: kind, scope: "全文", ok: true, reason: `核對 ${checked} 組${what}，均相符。` }];
+  }
+
+  // ---------- 總入口 ----------
+
+  function checkText(text, cfg, docYear = null) {
+    cfg = cfg || mergeConfig(null);
+    const on = cfg["檢查項目"] || {};
+    const enabled = (k) => on[k] !== false;
+    let found = [];
+    if (enabled("全半形")) found.push(...checkFullwidth(text), ...checkHalfPunct(text));
+    if (enabled("層次標號")) found.push(...checkOutline(text));
+    if (enabled("星期")) found.push(...checkWeekdays(text, docYear)[0]);
+    if (enabled("金額大寫")) found.push(...checkAmounts(text)[0]);
+    if (enabled("半形括號")) found.push(...checkHalfParen(text));
+    if (enabled("數字用法")) found.push(...checkNumbers(text));
+    if (enabled("計算數字")) found.push(...checkCalculatedNumbers(text, cfg["計算關鍵字"]));
+    if (enabled("日期")) found.push(...checkDates(text));
+    if (enabled("日期標註")) {
+      const bad = found.filter((f) => f.type === "日期").map((f) => [f.start, f.end]);
+      found.push(...checkDateMarks(text).filter((f) => !bad.some(([a, b]) => f.start < b && a < f.end)));
+    }
+    if (enabled("重複與空白")) {
+      found.push(...checkRepeat(text, new Set(cfg["疊字白名單"] || []), new Set(cfg["詞界常見字"] || [])),
+                 ...checkSpacing(text));
+    }
+    if (enabled("錯別字")) {
+      found.push(...checkTable(text, cfg["常見錯別字"], "錯別字", ""),
+                 ...checkStandardChar(text, [...DEFAULT_TAI_EXCEPTIONS, ...(cfg["台字例外"] || [])]));
+    }
+    if (enabled("公文用語")) found.push(...checkTable(text, cfg["公文用語"], "公文用語", "公文用語："));
+    const seen = new Set(), uniq = [];
+    for (const f of [...found].sort(byStartLong)) {
+      const k = f.start + "," + f.end;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      uniq.push(f);
+    }
+    return uniq;
+  }
+
+  function checkDocument(full, cfg) {
+    cfg = cfg || mergeConfig(null);
+    const on = cfg["檢查項目"] || {};
+    const enabled = (k) => on[k] !== false;
+    let out = [];
+    if (enabled("日期")) out.push(...checkDateStyle(full));
+    if (enabled("公文用語")) out.push(...checkOfficialTerms(full));
+    if (enabled("數字驗算")) out.push(...checkArithmetic(full));
+    if (enabled("星期")) out.push(...summary("星期", "日期與星期", checkWeekdays(full, inferDocYear(full))));
+    if (enabled("金額大寫")) out.push(...summary("金額大寫", "國字大寫金額與阿拉伯數字", checkAmounts(full)));
+    if (enabled("一致性")) {
+      out.push(...checkEnConsistency(full), ...checkNumberConsistency(full),
+               ...checkCjkEnSpacing(full), ...checkPercentConsistency(full));
+    }
+    // 同樣的提醒只列一次並註明次數
+    const merged = [], index = new Map();
+    for (const d of out) {
+      const k = d.type + "\u0000" + d.reason;
+      if (index.has(k)) { index.get(k).n++; continue; }
+      const item = { d: { ...d }, n: 1 };
+      index.set(k, item);
+      merged.push(item);
+    }
+    return merged.map(({ d, n }) => (n > 1 ? { ...d, reason: d.reason + `（同樣情形共 ${n} 處）` } : d));
+  }
+
+  PT.rules = {
+    DEFAULT_CONFIG, DEFAULT_TAI_EXCEPTIONS, TERM_LEVELS, mergeConfig,
+    checkText, checkDocument, inferDocYear, checkWeekdays, checkAmounts, cnAmountToInt,
+  };
+})(globalThis.PT = globalThis.PT || {});
+
+// ===== doc.js =====
+// 讀取 .docx / .odt，套用校對規則，並產出「標註過的副本」。
+// 由 Python 版 proof_doc.py（v2.0.0）移植。原則：標註只能加顏色，
+// Word 顯示出來的內容一個字、一個 Tab 都不能變；「只檢查」時完全不產生檔案。
+(function (PT) {
+  "use strict";
+  const R = () => PT.rules;
+
+  const DOCX_BODY = "word/document.xml";
+  const ODT_BODY = "content.xml";
+  const WS = " \t\r\n";
+  const isWS = (c) => WS.includes(c);
+  const lstripWS = (s) => { let i = 0; while (i < s.length && isWS(s[i])) i++; return s.slice(i); };
+  const rstripWS = (s) => { let i = s.length; while (i > 0 && isWS(s[i - 1])) i--; return s.slice(0, i); };
+
+  function unescapeXml(s) {
+    return s.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|lt|gt|amp|quot|apos);/g, (all, e) => {
+      if (e[0] === "#") {
+        const cp = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+        try { return String.fromCodePoint(cp); } catch (_) { return all; }
+      }
+      return { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" }[e];
+    });
+  }
+  const escapeXml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  // ---------- XML 小工具 ----------
+
+  const TAG_SRC = "<(\\/?)([\\w:.-]+)([^>]*?)(\\/?)>";
+  const TAG_STICKY = new RegExp(TAG_SRC, "sy");
+  const tagAt = (xml, i) => { TAG_STICKY.lastIndex = i; return TAG_STICKY.exec(xml); };
+
+  function elementEnd(xml, i) {
+    const m = tagAt(xml, i);
+    if (!m) return i + 1;
+    if (m[1] || m[4]) return i + m[0].length;
+    const name = m[2];
+    let depth = 1;
+    const g = new RegExp(TAG_SRC, "gs");
+    g.lastIndex = i + m[0].length;
+    let t;
+    while ((t = g.exec(xml))) {
+      if (t[2] !== name || t[4]) continue;
+      depth += t[1] ? -1 : 1;
+      if (depth === 0) return t.index + t[0].length;
+    }
+    return xml.length;
+  }
+
+  function children(inner) {
+    const out = [];
+    let i = 0;
+    while (i < inner.length) {
+      if (inner[i] !== "<") {
+        let j = inner.indexOf("<", i);
+        if (j < 0) j = inner.length;
+        out.push(["", inner.slice(i, j)]);
+        i = j;
+        continue;
+      }
+      const j = elementEnd(inner, i);
+      const m = tagAt(inner, i);
+      out.push([m ? m[2] : "", inner.slice(i, j)]);
+      i = j;
+    }
+    return out;
+  }
+
+  /** 最內層段落（不含其他段落）的 [起, 訖]；略過 mc:Fallback 裡的備援副本。 */
+  function leafBlocks(xml, names) {
+    const out = [], stack = [];
+    let fallback = 0;
+    const g = new RegExp(TAG_SRC, "gs");
+    let m;
+    while ((m = g.exec(xml))) {
+      const close = m[1], name = m[2], self = m[4];
+      if (name === "mc:Fallback" && !self) { fallback += close ? -1 : 1; continue; }
+      if (!names.includes(name) || self) continue;
+      if (!close) {
+        if (stack.length) stack[stack.length - 1][1] = true;
+        stack.push([m.index, false]);
+      } else if (stack.length) {
+        const [start, hasChild] = stack.pop();
+        if (!hasChild && fallback === 0) out.push([start, m.index + m[0].length]);
+      }
+    }
+    return out;
+  }
+
+  function ranges(n, spans) {
+    const merged = [];
+    for (const [a, b] of spans.map(([a, b]) => [Math.max(0, a), Math.min(n, b)]).sort((x, y) => x[0] - y[0] || x[1] - y[1])) {
+      if (a >= b) continue;
+      if (merged.length && a <= merged[merged.length - 1][1]) {
+        merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], b);
+      } else merged.push([a, b]);
+    }
+    const out = [];
+    let cur = 0;
+    for (const [a, b] of merged) {
+      if (a > cur) out.push([cur, a, false]);
+      out.push([a, b, true]);
+      cur = b;
+    }
+    if (cur < n) out.push([cur, n, false]);
+    return out;
+  }
+
+  function splitPieces(text, spans) {
+    const r = ranges(text.length, spans).map(([a, b, hi]) => [text.slice(a, b), hi]);
+    return r.length ? r : [[text, false]];
+  }
+
+  // ---------- docx ----------
+
+  const W_RUN = /<w:r(?=[\s>])[^>]*(?<!\/)>.*?<\/w:r>/gs;
+  const COLOR = '<w:color w:val="FF0000"/>';
+  const HIGHLIGHT = '<w:highlight w:val="yellow"/>';
+  const HILITE = COLOR + HIGHLIGHT;
+  // <w:rPr> 子元素的規定順序（ECMA-376 CT_RPr）
+  const RPR_ORDER = ["rStyle", "rFonts", "b", "bCs", "i", "iCs", "caps", "smallCaps", "strike", "dstrike",
+    "outline", "shadow", "emboss", "imprint", "noProof", "snapToGrid", "vanish", "webHidden", "color",
+    "spacing", "w", "kern", "position", "sz", "szCs", "highlight", "u", "effect", "bdr", "shd", "fitText",
+    "vertAlign", "rtl", "cs", "em", "lang", "eastAsianLayout", "specVanish", "oMath", "rPrChange"];
+  const RANK = new Map(RPR_ORDER.map((n, i) => [n, i]));
+
+  function rprWithHighlight(rpr) {
+    if (!rpr || rstripWS(rpr).endsWith("/>")) return `<w:rPr>${HILITE}</w:rPr>`;
+    const m = tagAt(rpr, 0);
+    const inner = rpr.slice(m[0].length, rpr.lastIndexOf("</w:rPr>"));
+    const kids = children(inner).filter(([n]) => n && n !== "w:color" && n !== "w:highlight");
+    for (const [name, xml] of [["color", COLOR], ["highlight", HIGHLIGHT]]) {
+      let pos = kids.length;
+      for (let i = 0; i < kids.length; i++) {
+        const n = kids[i][0];
+        if (n.startsWith("w:") && (RANK.has(n.slice(2)) ? RANK.get(n.slice(2)) : -1) > RANK.get(name)) { pos = i; break; }
+      }
+      kids.splice(pos, 0, ["w:" + name, xml]);
+    }
+    return m[0] + kids.map(([, x]) => x).join("") + "</w:rPr>";
+  }
+
+  function parseRun(runXml) {
+    const m = tagAt(runXml, 0);
+    const inner = runXml.slice(m[0].length, runXml.lastIndexOf("</w:r>"));
+    let rpr = "";
+    const items = [];
+    for (const [name, xml] of children(inner)) {
+      if (name === "w:rPr" && !rpr && !items.length) rpr = xml;
+      else if (name === "w:t") {
+        const t = tagAt(xml, 0);
+        const text = t[4] ? "" : unescapeXml(xml.slice(t[0].length, xml.lastIndexOf("</w:t>")));
+        items.push(["t", t[0], text, xml]);
+      } else items.push(["x", xml]);
+    }
+    return [m[0], rpr, items];
+  }
+
+  const runText = (items) => items.filter((it) => it[0] === "t").map((it) => it[2]).join("");
+  const withPreserve = (tag) => (tag.includes("xml:space=")
+    ? tag.replace(/xml:space="[^"]*"/, 'xml:space="preserve"') : tag.slice(0, -1) + ' xml:space="preserve">');
+
+  /** 產生 text[a:b] 的 <w:t>，保證 Word 顯示結果不變（詳見 Python 版說明）。 */
+  function tParts(tag, text, a, b) {
+    if (tag.includes('xml:space="preserve"')) return `${tag}${escapeXml(text.slice(a, b))}</w:t>`;
+    const n = text.length;
+    const lead = n - lstripWS(text).length, trail = n - rstripWS(text).length;
+    if (lead === n) return `${tag}${escapeXml(text.slice(a, b))}</w:t>`;
+    const visA = Math.max(a, lead), visB = Math.min(b, n - trail);
+    const out = [];
+    if (a < Math.min(b, lead)) out.push(`${tag}${text.slice(a, Math.min(b, lead))}</w:t>`);
+    if (visA < visB) {
+      const frag = text.slice(visA, visB);
+      const open = isWS(frag[0]) || isWS(frag[frag.length - 1]) ? withPreserve(tag) : tag;
+      out.push(`${open}${escapeXml(frag)}</w:t>`);
+    }
+    if (Math.max(a, n - trail) < b) out.push(`${tag}${text.slice(Math.max(a, n - trail), b)}</w:t>`);
+    return out.join("");
+  }
+
+  function docxMarkRun(runXml, spans) {
+    const [open, rpr, items] = parseRun(runXml);
+    const rprHi = rprWithHighlight(rpr);
+    const groups = [];
+    const emit = (hi, xml) => {
+      if (groups.length && groups[groups.length - 1][0] === hi) groups[groups.length - 1][1].push(xml);
+      else groups.push([hi, [xml]]);
+    };
+    let pos = 0;
+    for (const it of items) {
+      if (it[0] === "x") {
+        if (!lstripWS(it[1]) && groups.length) groups[groups.length - 1][1].push(it[1]);
+        else emit(false, it[1]);
+        continue;
+      }
+      const [, tag, text, xml] = it;
+      if (!text) { emit(false, xml); continue; }
+      const local = spans.filter(([a, b]) => a < pos + text.length && b > pos).map(([a, b]) => [a - pos, b - pos]);
+      for (const [a, b, hi] of ranges(text.length, local)) emit(hi, tParts(tag, text, a, b));
+      pos += text.length;
+    }
+    return groups.map(([hi, kids]) => `${open}${hi ? rprHi : rpr}${kids.join("")}</w:r>`).join("") || runXml;
+  }
+
+  function docxPara(xml) {
+    const runs = [];
+    let pos = 0;
+    for (const m of xml.matchAll(W_RUN)) {
+      const t = runText(parseRun(m[0])[2]);
+      if (!t) continue;
+      runs.push([m.index, m.index + m[0].length, pos, pos + t.length]);
+      pos += t.length;
+    }
+    const text = runs.map(([a, b]) => runText(parseRun(xml.slice(a, b))[2])).join("");
+    return [text, runs];
+  }
+
+  function docxMarkPara(xml, runs, spans) {
+    const out = [];
+    let last = 0;
+    for (const [ra, rb, ta, tb] of runs) {
+      const local = spans.filter(([a, b]) => a < tb && b > ta).map(([a, b]) => [Math.max(a, ta) - ta, Math.min(b, tb) - ta]);
+      if (!local.length) continue;
+      out.push(xml.slice(last, ra), docxMarkRun(xml.slice(ra, rb), local));
+      last = rb;
+    }
+    out.push(xml.slice(last));
+    return out.join("");
+  }
+
+  const docxParagraphs = (xml) => leafBlocks(xml, ["w:p"]).map(([a, b]) => docxPara(xml.slice(a, b))[0]);
+
+  // ---------- odt ----------
+
+  const ODT_STYLE_NAME = "ProofMark";
+  const ODT_STYLE = `<style:style style:name="${ODT_STYLE_NAME}" style:family="text">` +
+    '<style:text-properties fo:color="#FF0000" fo:background-color="#FFFF00"/></style:style>';
+
+  function odtPara(xml) {
+    const head = tagAt(xml, 0);
+    const chunks = [];
+    let pos = 0, i = head[0].length;
+    const end = xml.lastIndexOf("</");
+    while (i < end) {
+      let j = xml.indexOf("<", i);
+      if (j < 0 || j > end) j = end;
+      if (j > i) {
+        const t = unescapeXml(xml.slice(i, j));
+        chunks.push([i, j, pos, pos + t.length]);
+        pos += t.length;
+      }
+      if (j >= end) break;
+      const t = tagAt(xml, j);
+      i = t ? j + t[0].length : j + 1;
+    }
+    const text = chunks.map(([a, b]) => unescapeXml(xml.slice(a, b))).join("");
+    return [text, chunks];
+  }
+
+  function odtMarkPara(xml, chunks, spans) {
+    const out = [];
+    let last = 0;
+    for (const [xa, xb, ta, tb] of chunks) {
+      const local = spans.filter(([a, b]) => a < tb && b > ta).map(([a, b]) => [Math.max(a, ta) - ta, Math.min(b, tb) - ta]);
+      if (!local.length) continue;
+      const text = unescapeXml(xml.slice(xa, xb));
+      out.push(xml.slice(last, xa));
+      for (const [a, b, hi] of ranges(text.length, local)) {
+        const frag = escapeXml(text.slice(a, b));
+        out.push(hi ? `<text:span text:style-name="${ODT_STYLE_NAME}">${frag}</text:span>` : frag);
+      }
+      last = xb;
+    }
+    out.push(xml.slice(last));
+    return out.join("");
+  }
+
+  const odtParagraphs = (xml) => leafBlocks(xml, ["text:p", "text:h"]).map(([a, b]) => odtPara(xml.slice(a, b))[0]);
+
+  // ---------- 純文字 ----------
+
+  const TEXT_SUFFIXES = [".txt", ".rtf"];
+  const looksLikeRtf = (u8) => {
+    let i = 0;
+    while (i < u8.length && [9, 10, 11, 12, 13, 32].includes(u8[i])) i++;
+    return new TextDecoder("latin1").decode(u8.subarray(i, i + 5)).toLowerCase().startsWith("{\\rtf");
+  };
+
+  /** 自動判斷編碼。回傳 [文字, 編碼名稱]（與 Python 版相同的判斷順序：UTF-8 → Big5/CP950 → UTF-16）。 */
+  function readTextFile(u8) {
+    if (u8[0] === 0xef && u8[1] === 0xbb && u8[2] === 0xbf) return [new TextDecoder("utf-8").decode(u8.subarray(3)), "utf-8-sig"];
+    for (const [enc, label] of [["utf-8", "utf-8"], ["big5", "cp950"], ["utf-16le", "utf-16"]]) {
+      try { return [new TextDecoder(enc, { fatal: true, ignoreBOM: false }).decode(u8), label]; } catch (_) { /* 換下一種 */ }
+    }
+    return [new TextDecoder("utf-8").decode(u8), "utf-8(部分無法解碼)"];
+  }
+
+  const enc = new TextEncoder();
+  const DOCX_CT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
+  const DOCX_RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+  const DOCX_DOCRELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  // 公文標準字體：標楷體 16pt（w:sz 以半點為單位，故 32）
+  const DOCX_STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:docDefaults><w:rPrDefault><w:rPr>
+<w:rFonts w:ascii="標楷體" w:eastAsia="標楷體" w:hAnsi="標楷體"/>
+<w:sz w:val="32"/><w:szCs w:val="32"/>
+</w:rPr></w:rPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/>
+<w:pPr><w:spacing w:line="360" w:lineRule="auto"/></w:pPr></w:style>
+</w:styles>`;
+  const ODT_MANIFEST = `<?xml version="1.0" encoding="UTF-8"?>
+<manifest:manifest xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0" manifest:version="1.2">
+<manifest:file-entry manifest:full-path="/" manifest:media-type="application/vnd.oasis.opendocument.text"/>
+<manifest:file-entry manifest:full-path="content.xml" manifest:media-type="text/xml"/>
+<manifest:file-entry manifest:full-path="styles.xml" manifest:media-type="text/xml"/>
+</manifest:manifest>`;
+  const ODT_NS = 'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" ' +
+    'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" ' +
+    'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" ' +
+    'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0" office:version="1.2"';
+  const ODT_STYLES_XML = `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles ${ODT_NS}>
+<office:styles>
+<style:style style:name="Standard" style:family="paragraph">
+<style:text-properties style:font-name-asian="標楷體" fo:font-size="16pt" style:font-size-asian="16pt"/>
+</style:style>
+</office:styles>
+</office:document-styles>`;
+
+  function addContext(found, text) {
+    for (const f of found) {
+      f.paragraph = text;
+      f.context = text.slice(Math.max(0, f.start - 12), f.end + 12);
+    }
+    return found;
+  }
+
+  function textFindings(text, cfg) {
+    const docYear = R().inferDocYear(text);
+    return text.split("\n").map((raw) => {
+      const line = raw.replace(/\r+$/, "");
+      const found = line.trim() ? addContext(R().checkText(line, cfg, docYear), line) : [];
+      return [line, found];
+    });
+  }
+
+  async function textToMarkedDocx(lines) {
+    const paras = lines.map(([line, found]) => "<w:p>" + splitPieces(line, found.map((f) => [f.start, f.end]))
+      .filter(([frag]) => frag)
+      .map(([frag, hi]) => `<w:r>${hi ? `<w:rPr>${HILITE}</w:rPr>` : ""}<w:t xml:space="preserve">${escapeXml(frag)}</w:t></w:r>`)
+      .join("") + "</w:p>");
+    const doc = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + paras.join("") +
+      '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/>' +
+      "</w:sectPr></w:body></w:document>";
+    return PT.writeZip([
+      { name: "[Content_Types].xml", data: enc.encode(DOCX_CT) },
+      { name: "_rels/.rels", data: enc.encode(DOCX_RELS) },
+      { name: "word/_rels/document.xml.rels", data: enc.encode(DOCX_DOCRELS) },
+      { name: "word/styles.xml", data: enc.encode(DOCX_STYLES) },
+      { name: "word/document.xml", data: enc.encode(doc) },
+    ]);
+  }
+
+  async function textToMarkedOdt(lines) {
+    const paras = lines.map(([line, found]) => '<text:p text:style-name="Standard">' +
+      splitPieces(line, found.map((f) => [f.start, f.end])).filter(([frag]) => frag)
+        .map(([frag, hi]) => (hi ? `<text:span text:style-name="${ODT_STYLE_NAME}">${escapeXml(frag)}</text:span>` : escapeXml(frag)))
+        .join("") + "</text:p>");
+    const content = '<?xml version="1.0" encoding="UTF-8"?>\n' + `<office:document-content ${ODT_NS}>` +
+      `<office:automatic-styles>${ODT_STYLE}</office:automatic-styles>` +
+      "<office:body><office:text>" + paras.join("") + "</office:text></office:body></office:document-content>";
+    return PT.writeZip([
+      { name: "mimetype", data: enc.encode("application/vnd.oasis.opendocument.text"), method: 0 },
+      { name: "META-INF/manifest.xml", data: enc.encode(ODT_MANIFEST) },
+      { name: "styles.xml", data: enc.encode(ODT_STYLES_XML) },
+      { name: "content.xml", data: enc.encode(content) },
+    ]);
+  }
+
+  // ---------- 主流程 ----------
+
+  const fail = (message) => ({ ok: false, count: 0, findings: [], doc_level: [], message });
+  const splitName = (name) => {
+    const i = name.lastIndexOf(".");
+    return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, ""];
+  };
+
+  /**
+   * 校對一份文件。file = {name, bytes:Uint8Array}。
+   * write=true 時回傳的 out = {name, bytes} 是標註過的副本；write=false 只回傳檢查結果。
+   */
+  async function proofFile(file, cfg, { outFormat = "docx", write = true } = {}) {
+    try {
+      return await proofFileInner(file, cfg || R().mergeConfig(null), outFormat, write);
+    } catch (e) {
+      if (e instanceof PT.ZipError) return fail("無法開啟：檔案可能設有密碼保護、已損毀，或其實不是 Word/ODF 格式");
+      return fail(`處理時發生錯誤：${e && e.name || "Error"}：${e && e.message || e}`);
+    }
+  }
+
+  async function proofFileInner(file, cfg, outFormat, write) {
+    const [stem, ext0] = splitName(file.name);
+    const suffix = ext0.toLowerCase();
+
+    if (TEXT_SUFFIXES.includes(suffix)) {
+      if (looksLikeRtf(file.bytes)) return fail("這是真正的 RTF（含格式控制碼），目前尚未支援；請先用 Word 另存成 .docx");
+      const [text, encName] = readTextFile(file.bytes);
+      const ext = (outFormat || "docx").toLowerCase() === "odt" ? ".odt" : ".docx";
+      const lines = textFindings(text, cfg);
+      const findings = lines.flatMap(([, f]) => f);
+      const kind = ext === ".odt" ? "ODF" : "Word";
+      const res = {
+        ok: true, count: findings.length, findings, doc_level: R().checkDocument(text, cfg), converted: true,
+        message: `原檔是純文字（${encName}）` + (write ? `，已轉存為 ${kind} 檔並標註 ${findings.length} 處` : `，產出副本時會轉存為 ${kind} 檔`),
+      };
+      if (write) res.out = { name: `${stem}-校對${ext}`, bytes: await (ext === ".odt" ? textToMarkedOdt(lines) : textToMarkedDocx(lines)) };
+      return res;
+    }
+
+    if (suffix !== ".docx" && suffix !== ".odt") {
+      return fail(`不支援的格式 ${suffix}（可處理 .docx / .odt / 純文字；舊版 .doc 請先用 Word 另存成 .docx）`);
+    }
+    const bodyPart = suffix === ".docx" ? DOCX_BODY : ODT_BODY;
+    const z = PT.readZip(file.bytes);
+    if (!z.has(bodyPart)) return fail(`檔案內找不到正文（${bodyPart}），可能不是有效的文件檔`);
+
+    const body = new TextDecoder("utf-8").decode(await z.read(bodyPart));
+    const [blocks, parse, mark] = suffix === ".docx"
+      ? [leafBlocks(body, ["w:p"]), docxPara, docxMarkPara]
+      : [leafBlocks(body, ["text:p", "text:h"]), odtPara, odtMarkPara];
+
+    // 先讀完全文，才知道「省略年份的日期」該用哪一年核對星期
+    const paras = blocks.map(([a, b]) => [a, b, ...parse(body.slice(a, b))]);
+    const docText = paras.map((p) => p[2]).join("\n");
+    const docYear = R().inferDocYear(docText);
+
+    const all = [], newBody = [];
+    let last = 0;
+    for (const [a, b, text, segs] of paras) {
+      if (!text.trim()) continue;
+      const found = R().checkText(text, cfg, docYear);
+      if (!found.length) continue;
+      all.push(...addContext(found, text));
+      if (write && segs.length) {
+        newBody.push(body.slice(last, a), mark(body.slice(a, b), segs, found.map((f) => [f.start, f.end])));
+        last = b;
+      }
+    }
+    newBody.push(body.slice(last));
+
+    const docLevel = R().checkDocument(docText, cfg);
+    const note = docLevel.length ? `；另有 ${docLevel.length} 項全文層級提醒` : "";
+    const res = { ok: true, count: all.length, findings: all, doc_level: docLevel, message: `共 ${all.length} 處${note}` };
+    if (!write) return res;
+
+    let bodyOut = newBody.join("");
+    if (suffix === ".odt" && !bodyOut.includes(`style:name="${ODT_STYLE_NAME}"`)) {
+      if (bodyOut.includes("</office:automatic-styles>")) {
+        bodyOut = bodyOut.replace("</office:automatic-styles>", ODT_STYLE + "</office:automatic-styles>");
+      } else {
+        bodyOut = bodyOut.replace(/<office:automatic-styles\s*\/>/,
+          () => `<office:automatic-styles>${ODT_STYLE}</office:automatic-styles>`);
+      }
+    }
+    // 依原檔的順序與壓縮方式寫出（ODT 的 mimetype 必須排第一且不壓縮）
+    const files = [];
+    for (const e of z.entries) {
+      const data = e.name === bodyPart ? enc.encode(bodyOut) : await z.read(e.name);
+      files.push({ name: e.name, data, method: e.method === 0 ? 0 : 8, time: e.time, date: e.date, extAttr: e.extAttr });
+    }
+    res.out = { name: `${stem}-校對${ext0}`, bytes: await PT.writeZip(files) };
+    res.message = `共標註 ${all.length} 處${note}`;
+    return res;
+  }
+
+  PT.doc = { proofFile, docxParagraphs, odtParagraphs, readTextFile, looksLikeRtf, unescapeXml };
+})(globalThis.PT = globalThis.PT || {});
+
+// ===== compare.js =====
+// 彙整核對：檢查「來源文件」的內容有沒有正確地貼進「彙整檔」。
+// 由 Python 版 compare_core.py（v2.0.0）移植。這是單向核對：來源的每一段，
+// 在彙整檔裡找不找得到、找到的是否一字不差。
+//   相符     來源這一段在彙整檔裡找到一模一樣的
+//   有出入   找到很相似的一段，但文字有差異（多半是數字被改到或漏字）
+//   找不到   彙整檔裡沒有相對應的內容，可能漏貼
+(function (PT) {
+  "use strict";
+
+  const SUPPORTED = [".docx", ".odt", ".xlsx", ".pptx", ".txt", ".rtf"];
+  const MIN_LEN = 8;     // 太短的段落（標題、編號、單一數字）拿來比對意義不大
+  const NEAR = 0.70;     // 相似度達這個門檻才算「找到對應段落」
+  const dec = (u8) => new TextDecoder("utf-8").decode(u8);
+  const cps = (s) => Array.from(s);
+  const unesc = (s) => PT.doc.unescapeXml(s);
+
+  /** 與 Python round(x, 3) 相同（以浮點數的精確值做「四捨六入五成雙」）。 */
+  function pyRound3(x) {
+    const s = x.toFixed(100);
+    const [ip, fp] = s.split(".");
+    const head = ip + "." + fp.slice(0, 3), rest = fp.slice(3);
+    let v = Number(head);
+    const tie = /^50*$/.test(rest), up = rest[0] > "5" || (rest[0] === "5" && !tie);
+    if (up || (tie && Number(fp[2]) % 2 === 1)) v = Number((v + 0.001).toFixed(3));
+    return v;
+  }
+
+  function extOf(name) {
+    const i = name.lastIndexOf(".");
+    return i > 0 ? name.slice(i).toLowerCase() : "";
+  }
+
+  /** 把檔案讀成段落列表。file = {name, bytes}。 */
+  async function readParagraphs(file) {
+    const ext = extOf(file.name);
+    if (ext === ".docx" || ext === ".odt") {
+      const part = ext === ".docx" ? "word/document.xml" : "content.xml";
+      const z = PT.readZip(file.bytes);
+      const body = dec(await z.read(part) || new Uint8Array());
+      return ext === ".docx" ? PT.doc.docxParagraphs(body) : PT.doc.odtParagraphs(body);
+    }
+    if (ext === ".xlsx") return readXlsx(file.bytes);
+    if (ext === ".pptx") return readPptx(file.bytes);
+    if (ext === ".txt" || ext === ".rtf") {
+      if (PT.doc.looksLikeRtf(file.bytes)) throw new Error("這是真正的 RTF（含格式控制碼），請先另存成 .docx");
+      return PT.doc.readTextFile(file.bytes)[0].split("\n");
+    }
+    throw new Error(`不支援的格式 ${ext}（可比對 Word .docx、ODF .odt、Excel .xlsx、` +
+                    "簡報 .pptx 與純文字；舊版 .doc / .xls / .ppt 請先另存成新格式）");
+  }
+
+  function xmlText(fragment) {
+    fragment = fragment.replace(/<rPh\b.*?<\/rPh>/gs, "");
+    return unesc(fragment.replace(/<[^>]+>/g, "").replace(/\s+/gu, " ")).trim();
+  }
+
+  /** Excel 數值的浮點誤差還原（0.30000000000000004 → 0.3），與 Python 版相同。 */
+  function numText(v) {
+    if (!/^\s*[-+]?(\d+\.?\d*|\.\d+)([eE][-+]?\d+)?\s*$/.test(v)) return v;
+    const x = Number(v);
+    if (Number.isInteger(x) && Math.abs(x) < 1e15) return BigInt(x).toString();
+    return Number(x.toFixed(10)).toFixed(6).replace(/0+$/, "").replace(/\.$/, "");
+  }
+
+  // 儲存格可能是自閉合的空格 <c r="A1" s="2"/>（有框線或格式但沒有值）
+  const XLSX_CELL = /<c\b([^>]*?)(?:\/>|>(.*?)<\/c>)/gs;
+
+  async function readXlsx(bytes) {
+    const z = PT.readZip(bytes);
+    const shared = [];
+    if (z.has("xl/sharedStrings.xml")) {
+      const sx = dec(await z.read("xl/sharedStrings.xml"));
+      for (const m of sx.matchAll(/<si>(.*?)<\/si>|<si\/>/gs)) shared.push(xmlText(m[1] || ""));
+    }
+    const out = [];
+    const sheets = z.entries.map((e) => e.name).filter((n) => /^xl\/worksheets\/sheet\d+\.xml$/.test(n)).sort();
+    for (const sh of sheets) {
+      const xml = dec(await z.read(sh));
+      for (const cm of xml.matchAll(XLSX_CELL)) {
+        const attrs = cm[1], body = cm[2] || "";
+        if (!body) continue;
+        let t;
+        if (body.includes("<is>")) t = xmlText(body);
+        else if (attrs.includes('t="s"')) {
+          const v = /<v>(\d+)<\/v>/.exec(body);
+          const i = v ? parseInt(v[1], 10) : -1;
+          t = i >= 0 && i < shared.length ? shared[i] : "";
+        } else {
+          const v = /<v>(.*?)<\/v>/s.exec(body);
+          t = v ? unesc(v[1].trim()) : "";
+          if (t && !attrs.includes('t="')) t = numText(t);
+        }
+        if (t) out.push(t);
+      }
+    }
+    return out;
+  }
+
+  async function readPptx(bytes) {
+    const z = PT.readZip(bytes);
+    const slides = z.entries.map((e) => e.name).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => parseInt(/(\d+)/.exec(a)[1], 10) - parseInt(/(\d+)/.exec(b)[1], 10));
+    const out = [];
+    for (const s of slides) {
+      const xml = dec(await z.read(s));
+      for (const pm of xml.matchAll(/<a:p\b[^>]*>.*?<\/a:p>/gs)) {
+        const text = unesc([...pm[0].matchAll(/<a:t>(.*?)<\/a:t>/gs)].map((m) => m[1]).join(""));
+        if (text.trim()) out.push(text);
+      }
+    }
+    return out;
+  }
+
+  /** 正規化後再比對：空白、全半形標點、千分位逗號不算差異；數字與文字本身不動。 */
+  function norm(s) {
+    s = s.replace(/\s+/gu, "");
+    s = s.replace(/(?<=[0-9０-９])[,，](?=[0-9０-９]{3}(?![0-9０-９]))/gu, "");
+    const from = "（）：；，。、！？％１２３４５６７８９０", to = "():;,.、!?%1234567890";
+    return cps(s).map((c) => { const i = from.indexOf(c); return i >= 0 ? to[i] : c; }).join("");
+  }
+
+  function diffDetail(a, b) {
+    const A = cps(a), B = cps(b), out = [];
+    for (const [tag, i1, i2, j1, j2] of new PT.SequenceMatcher(a, b).getOpcodes()) {
+      if (tag === "equal") continue;
+      const src = A.slice(i1, i2).join("").trim(), dst = B.slice(j1, j2).join("").trim();
+      if (!src && !dst) continue;
+      if (tag === "replace") out.push(`「${src}」→「${dst}」`);
+      else if (tag === "delete") out.push(`少了「${src}」`);
+      else if (tag === "insert") out.push(`多了「${dst}」`);
+    }
+    return out;
+  }
+
+  function checkPasted(sourceParas, targetParas, minLen = MIN_LEN, near = NEAR) {
+    const targets = targetParas.filter((t) => t && t.trim()).map((t) => [t, norm(t)]);
+    const targetNorms = new Set(targets.map(([, n]) => n));
+    let matched = 0;
+    const diff = [], missing = [];
+    for (const src of sourceParas) {
+      if (!src || cps(src.trim()).length < minLen) continue;
+      const ns = norm(src);
+      if (!ns) continue;
+      if (targetNorms.has(ns)) { matched++; continue; }
+      let best = null, bestRatio = 0.0;
+      for (const [raw, nt] of targets) {
+        const sm = new PT.SequenceMatcher(ns, nt);
+        if (sm.quickRatio() < bestRatio) continue;
+        const r = sm.ratio();
+        if (r > bestRatio) { best = raw; bestRatio = r; }
+      }
+      if (best !== null && bestRatio >= near) {
+        diff.push({ source: src.trim(), target: best.trim(), ratio: pyRound3(bestRatio),
+                    detail: diffDetail(src.trim(), best.trim()) });
+      } else {
+        missing.push({ source: src.trim(), closest: cps((best || "").trim()).slice(0, 60).join(""),
+                       ratio: pyRound3(bestRatio) });
+      }
+    }
+    return { matched, diff, missing, checked: matched + diff.length + missing.length };
+  }
+
+  /** 核對一份來源檔與一份彙整檔。 */
+  async function compareFiles(source, target, minLen = MIN_LEN, near = NEAR) {
+    const srcP = await readParagraphs(source), tgtP = await readParagraphs(target);
+    const r = checkPasted(srcP, tgtP, minLen, near);
+    return Object.assign(r, { source_name: source.name, target_name: target.name,
+                              source_paras: srcP.length, target_paras: tgtP.length });
+  }
+
+  PT.compare = { SUPPORTED, readParagraphs, checkPasted, compareFiles, pyRound3 };
+})(globalThis.PT = globalThis.PT || {});
+
+// ===== app.js =====
+// 操作介面。所有處理都在瀏覽器內完成，不連任何網路。
+(function (PT) {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const DOC_EXT = [".docx", ".odt", ".txt", ".rtf"];
+  const canWriteFolder = typeof window.showDirectoryPicker === "function";   // Chrome、Edge
+  const USER_KEY = "proofTool.userConfig";
+
+  // ---------- 設定：內建 → 機關共用（嵌在本檔）→ 個人（存在瀏覽器）----------
+
+  let orgConfig = {};
+  try { orgConfig = JSON.parse($("org-config").textContent || "{}"); } catch (_) { orgConfig = {}; }
+  const loadUser = () => { try { return JSON.parse(localStorage.getItem(USER_KEY) || "{}"); } catch (_) { return {}; } };
+  const saveUser = (u) => { try { localStorage.setItem(USER_KEY, JSON.stringify(u)); return true; } catch (_) { return false; } };
+  let userConfig = loadUser();
+  const config = () => PT.rules.mergeConfig(userConfig, PT.rules.mergeConfig(orgConfig));
+
+  // ---------- 選檔 ----------
+
+  const state = { files: [], dir: null, dirName: "" };
+
+  const extOf = (n) => { const i = n.lastIndexOf("."); return i > 0 ? n.slice(i).toLowerCase() : ""; };
+  const stemOf = (n) => { const i = n.lastIndexOf("."); return i > 0 ? n.slice(0, i) : n; };
+  // 與 Python 版相同的篩選：跳過 Word 暫存檔（~$）、先前產生的校對本
+  const wanted = (f) => DOC_EXT.includes(extOf(f.name)) && !f.name.startsWith("~$")
+    && !stemOf(f.name).endsWith("-校對") && !f.name.includes(".__preview__");
+
+  function setFiles(list, dir = null, dirName = "") {
+    const seen = new Set();
+    state.files = list.filter(wanted).filter((f) => !seen.has(f.name) && seen.add(f.name))
+      .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    state.dir = dir;
+    state.dirName = dirName;
+    const skipped = list.length - state.files.length;
+    $("fileList").innerHTML = state.files.length
+      ? `已選 ${state.files.length} 份${dirName ? `（資料夾「${esc(dirName)}」）` : ""}：` +
+        state.files.map((f) => `<span>${esc(f.name)}</span>`).join("") +
+        (skipped ? `<div class="hint">另有 ${skipped} 個檔案不是可校對的格式或是先前的校對本，已略過。</div>` : "")
+      : (list.length ? '<span class="err">這裡面沒有可校對的檔案（支援 .docx / .odt / 純文字；舊版 .doc 請先用 Word 另存成 .docx）</span>' : "");
+    $("result").innerHTML = "";
+    $("markResult").innerHTML = "";
+    $("markBox").style.display = "none";
+  }
+
+  $("pickFiles").onclick = () => $("fileInput").click();
+  $("fileInput").onchange = (e) => setFiles([...e.target.files]);
+
+  $("pickFolder").onclick = async () => {
+    if (!canWriteFolder) return $("folderInput").click();
+    try {
+      // Chrome：取得資料夾的讀寫權限，副本可以直接存回同一個資料夾
+      const dir = await window.showDirectoryPicker({ mode: "readwrite" });
+      const files = [];
+      for await (const h of dir.values()) if (h.kind === "file") files.push(await h.getFile());
+      setFiles(files, dir, dir.name);
+    } catch (e) {
+      if (e && e.name !== "AbortError") $("folderInput").click();
+    }
+  };
+  // Firefox：只能讀取資料夾，只取第一層（與 Python 版相同，不含子資料夾）
+  $("folderInput").onchange = (e) => {
+    const all = [...e.target.files];
+    const top = all.filter((f) => (f.webkitRelativePath || "").split("/").length === 2);
+    setFiles(top, null, all[0] ? all[0].webkitRelativePath.split("/")[0] : "");
+  };
+  $("folderHint").textContent = canWriteFolder
+    ? "用「選擇資料夾」時，標註過的副本會直接存回同一個資料夾（瀏覽器會先詢問您是否允許）。"
+    : "此瀏覽器無法直接寫回資料夾，標註過的副本會以下載方式提供（多份時打包成一個 zip）。";
+
+  const drop = $("drop");
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", async (e) => {
+    const items = [...(e.dataTransfer.items || [])].map((it) => it.webkitGetAsEntry && it.webkitGetAsEntry()).filter(Boolean);
+    const files = [];
+    const fileOf = (entry) => new Promise((ok, no) => entry.file(ok, no));
+    for (const en of items) {
+      if (en.isFile) files.push(await fileOf(en));
+      else if (en.isDirectory) {                    // 拖進資料夾：取第一層的檔案
+        const reader = en.createReader();
+        let batch;
+        do {
+          batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+          for (const c of batch) if (c.isFile) files.push(await fileOf(c));
+        } while (batch.length);
+      }
+    }
+    setFiles(files.length ? files : [...e.dataTransfer.files]);
+  });
+
+  const fmt = () => (document.querySelector('input[name="fmt"]:checked') || {}).value || "docx";
+  const bytesOf = async (f) => new Uint8Array(await f.arrayBuffer());
+  const progress = (s) => { $("progress").textContent = s || ""; };
+
+  // ---------- ① 檢查 ----------
+
+  function renderDocLevel(list) {
+    if (!list || !list.length) return "";
+    return '<div class="warn">' + list.map((d) => (d.ok
+      ? `<span class="okline">✓ <b>[${esc(d.type)}]</b> ${esc(d.reason)}</span>`
+      : `<b>[${esc(d.type)}]</b> ${esc(d.reason)}`)).join("<br>") + "</div>";
+  }
+
+  $("checkBtn").onclick = async () => {
+    if (!state.files.length) return alert("請先選要檢查的文件或資料夾");
+    const btn = $("checkBtn");
+    btn.disabled = true;
+    $("markResult").innerHTML = "";
+    const cfg = config();
+    let html = "", total = 0, okFiles = 0;
+    try {
+      for (let i = 0; i < state.files.length; i++) {
+        const f = state.files[i];
+        progress(`檢查中… ${i + 1}／${state.files.length}　${f.name}`);
+        const r = await PT.doc.proofFile({ name: f.name, bytes: await bytesOf(f) }, cfg, { outFormat: fmt(), write: false });
+        html += `<div class="file-head">${esc(f.name)}　<span class="tag">${r.ok ? r.count + " 處" : "無法處理"}</span>` +
+                (r.converted ? '<span class="tag" style="background:#c6f6d5">純文字，將轉檔後標註</span>' : "") + "</div>";
+        if (!r.ok) { html += `<div class="warn">${esc(r.message)}</div>`; continue; }
+        okFiles++;
+        total += r.count;
+        html += renderDocLevel(r.doc_level);
+        if (!r.count) { html += '<div class="none">沒有發現問題。</div>'; continue; }
+        html += '<table><thead><tr><th style="width:84px">類型</th><th style="width:120px">內容</th><th style="width:110px">建議</th><th>說明與前後文</th></tr></thead><tbody>' +
+          r.findings.map((x) => `<tr><td><span class="tag">${esc(x.type)}</span></td><td><span class="mark">${esc(x.text)}</span></td>` +
+            `<td>${esc(x.suggest) || "—"}</td><td>${esc(x.reason)}<br><span class="ctx">…${esc(x.context)}…</span></td></tr>`).join("") +
+          "</tbody></table>";
+      }
+      $("result").innerHTML = `<h2>檢查結果（共 ${total} 處）</h2>` + html;
+      $("markBox").style.display = total && okFiles ? "block" : "none";
+      $("markHint").textContent = state.dir
+        ? `副本會存回資料夾「${state.dirName}」，檔名加「-校對」，原檔不會被修改。`
+        : canWriteFolder ? "會請您選擇要存放副本的資料夾；原檔不會被修改。"
+        : state.files.length > 1 ? "副本會打包成一個 zip 下載；原檔不會被修改。" : "副本會以下載方式提供；原檔不會被修改。";
+    } catch (e) {
+      $("result").innerHTML = `<div class="warn err">檢查時發生未預期的錯誤：${esc(e && e.message || e)}</div>`;
+    } finally {
+      progress("");
+      btn.disabled = false;
+    }
+  };
+
+  // ---------- ② 產出標註過的副本 ----------
+
+  // 下載。Chrome、Edge 用「另存新檔」對話框（可自選存放位置）；其他瀏覽器（Firefox）直接下載。
+  async function download(name, bytes, type = "application/octet-stream") {
+    if (typeof window.showSaveFilePicker === "function") {
+      try {
+        const h = await window.showSaveFilePicker({ suggestedName: name });
+        const w = await h.createWritable();
+        await w.write(new Blob([bytes], { type }));
+        await w.close();
+        return h.name;
+      } catch (e) {
+        if (e && e.name === "AbortError") return null;      // 使用者按了取消
+      }
+    }
+    const url = URL.createObjectURL(new Blob([bytes], { type }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return name;
+  }
+
+  async function writeToDir(dir, name, bytes) {
+    const h = await dir.getFileHandle(name, { create: true });
+    const w = await h.createWritable();
+    await w.write(bytes);
+    await w.close();
+  }
+
+  const stamp = () => {
+    const d = new Date(), p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`;
+  };
+
+  $("markBtn").onclick = async () => {
+    const btn = $("markBtn");
+    btn.disabled = true;
+    try {
+      let dir = state.dir;
+      if (!dir && canWriteFolder) {
+        try { dir = await window.showDirectoryPicker({ mode: "readwrite" }); }
+        catch (e) { if (e && e.name === "AbortError") return; dir = null; }
+      }
+      const cfg = config(), rows = [], outs = [];
+      for (let i = 0; i < state.files.length; i++) {
+        const f = state.files[i];
+        progress(`產出中… ${i + 1}／${state.files.length}　${f.name}`);
+        const r = await PT.doc.proofFile({ name: f.name, bytes: await bytesOf(f) }, cfg, { outFormat: fmt(), write: true });
+        if (r.ok && r.out) {
+          if (dir) {
+            try { await writeToDir(dir, r.out.name, r.out.bytes); }
+            catch (e) {
+              rows.push([f.name, "", r.count, `無法寫入資料夾：${e && e.message || e}（檔案可能正被 Word 開啟中）`]);
+              continue;
+            }
+          } else outs.push(r.out);
+        }
+        rows.push([f.name, r.ok && r.out ? r.out.name : "", r.count, r.message]);
+      }
+      let where = "";
+      if (dir) where = `已存到資料夾「${dir.name}」。`;
+      else if (outs.length === 1) {
+        const saved = await download(outs[0].name, outs[0].bytes);
+        where = saved ? `已下載「${saved}」。` : "已取消下載。";
+      } else if (outs.length > 1) {
+        const zipName = `校對結果-${stamp()}.zip`;
+        const saved = await download(zipName, await PT.writeZip(outs.map((o) => ({ name: o.name, data: o.bytes }))), "application/zip");
+        where = saved ? `共 ${outs.length} 份，已打包成「${saved}」下載。` : "已取消下載。";
+      }
+      $("markResult").innerHTML = `<h2>產出結果</h2><p class="okline">${esc(where)}</p>` +
+        "<table><thead><tr><th>原檔</th><th>標註本</th><th>處數</th><th>說明</th></tr></thead><tbody>" +
+        rows.map(([a, b, c, d]) => `<tr><td>${esc(a)}</td><td><b>${esc(b)}</b></td><td>${c}</td><td>${esc(d)}</td></tr>`).join("") +
+        "</tbody></table>";
+    } catch (e) {
+      $("markResult").innerHTML = `<div class="warn err">產出時發生未預期的錯誤：${esc(e && e.message || e)}</div>`;
+    } finally {
+      progress("");
+      btn.disabled = false;
+    }
+  };
+
+  // ---------- 彙整核對 ----------
+
+  const cmp = { src: [], tgt: null };
+  $("cmpSrcBtn").onclick = () => $("cmpSrc").click();
+  $("cmpTgtBtn").onclick = () => $("cmpTgt").click();
+  $("cmpSrc").onchange = (e) => {
+    cmp.src = [...e.target.files].filter((f) => !f.name.startsWith("~$"));
+    $("cmpSrcName").textContent = cmp.src.length ? cmp.src.map((f) => f.name).join("、") : "尚未選擇";
+  };
+  $("cmpTgt").onchange = (e) => {
+    cmp.tgt = e.target.files[0] || null;
+    $("cmpTgtName").textContent = cmp.tgt ? cmp.tgt.name : "尚未選擇";
+  };
+
+  $("cmpBtn").onclick = async () => {
+    if (!cmp.src.length || !cmp.tgt) return alert("請選擇來源檔與彙整檔");
+    const btn = $("cmpBtn");
+    btn.disabled = true;
+    try {
+      const same = (f) => f.name === cmp.tgt.name && f.size === cmp.tgt.size && f.lastModified === cmp.tgt.lastModified;
+      const srcs = cmp.src.filter((f) => !same(f) && PT.compare.SUPPORTED.includes(extOf(f.name)));
+      if (!srcs.length) throw new Error("沒有可比對的來源檔（支援 Word / ODF / Excel / 簡報 / 純文字）");
+      const target = { name: cmp.tgt.name, bytes: await bytesOf(cmp.tgt) };
+      let html = `<h2>核對結果（彙整檔：${esc(target.name)}）</h2>`;
+      for (let i = 0; i < srcs.length; i++) {
+        const f = srcs[i];
+        $("cmpResult").innerHTML = `核對中… ${i + 1}／${srcs.length}`;
+        let r;
+        try { r = await PT.compare.compareFiles({ name: f.name, bytes: await bytesOf(f) }, target); }
+        catch (e) {
+          const msg = e instanceof PT.ZipError ? "無法開啟：檔案可能設有密碼保護或已損毀" : (e && e.message || String(e));
+          html += `<div class="file-head">${esc(f.name)}　<span class="tag">無法處理</span></div><div class="warn">${esc(msg)}</div>`;
+          continue;
+        }
+        const bad = r.diff.length + r.missing.length;
+        html += `<div class="file-head">${esc(f.name)}　<span class="tag">核對 ${r.checked} 段</span>` +
+                `<span class="tag" style="background:#c6f6d5">相符 ${r.matched}</span>` +
+                (bad ? `<span class="tag" style="background:#fed7d7">待確認 ${bad}</span>` : "") + "</div>";
+        if (!bad) { html += '<div class="none">來源內容都正確出現在彙整檔裡。</div>'; continue; }
+        if (r.diff.length) {
+          html += '<table><thead><tr><th style="width:44%">來源</th><th style="width:44%">彙整檔</th><th>差異</th></tr></thead><tbody>' +
+            r.diff.map((d) => `<tr><td>${esc(d.source)}</td><td>${esc(d.target)}</td><td><span class="mark">${esc(d.detail.join("；"))}</span></td></tr>`).join("") +
+            "</tbody></table>";
+        }
+        if (r.missing.length) {
+          html += '<div class="warn"><b>彙整檔裡找不到以下內容（可能漏貼）：</b><ul>' +
+            r.missing.map((m) => `<li>${esc(m.source)}</li>`).join("") + "</ul></div>";
+        }
+      }
+      if (/\.xlsx$/i.test(target.name)) {
+        html += '<p class="hint">提醒：Excel 儲存的是原始值，百分比（21% 存成 0.21）、日期（存成序號）等格式無法還原，這類儲存格若顯示「有出入」請以人工判斷。</p>';
+      }
+      $("cmpResult").innerHTML = html;
+    } catch (e) {
+      $("cmpResult").innerHTML = `<div class="warn err">${esc(e && e.message || e)}</div>`;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  // ---------- 設定畫面 ----------
+
+  function renderConfig(msg = "") {
+    const c = config(), t = PT.rules.TERM_LEVELS;
+    const toggles = Object.entries(c["檢查項目"] || {}).map(([k, v]) =>
+      `<label><input type="checkbox" data-k="${esc(k)}" ${v ? "checked" : ""}> ${esc(k)}</label>`).join("");
+    const orgNote = Object.keys(orgConfig).length ? "（已套用本檔內建的機關共用設定）" : "";
+    let h = `<b>啟用的檢查</b> ${orgNote}<div class="toggles">${toggles}</div>`;
+    h += '<p class="hint">勾選的變更會立即生效，並記在這個瀏覽器裡；換電腦或清除瀏覽資料會消失，請用「匯出設定」備份。</p>';
+    h += '<button class="secondary" id="cfgExport">匯出設定</button><button class="secondary" id="cfgImport">匯入設定</button>' +
+         '<button class="secondary" id="cfgReset">還原預設</button><input type="file" id="cfgFile" accept=".json" hidden>';
+    if (msg) h += `<span class="okline">　${esc(msg)}</span>`;
+    h += "<h2>錯別字對照表</h2><table><thead><tr><th>寫成</th><th>應為</th></tr></thead><tbody>" +
+      Object.entries(c["常見錯別字"] || {}).map(([a, b]) => `<tr><td>${esc(a)}</td><td>${esc(b)}</td></tr>`).join("") + "</tbody></table>";
+    h += `<h2>「台」字不改「臺」的例外</h2><p class="hint">${esc([...PT.rules.DEFAULT_TAI_EXCEPTIONS, ...(c["台字例外"] || [])].join("、"))}</p>`;
+    h += '<h2>公文用語層級表</h2><p class="hint">依文書處理手冊公文用語表，供核對。「該」為間接稱謂、各方向通用，不列入。</p>' +
+      '<table><thead><tr><th style="width:70px">層級</th><th>稱謂語</th><th>期望及目的用語</th><th style="width:70px">引敘語</th></tr></thead><tbody>' +
+      Object.entries(t).map(([lv, g]) => `<tr><td><b>${esc(lv)}</b></td><td>${esc((g["稱謂"] || []).join("、")) || "—"}</td>` +
+        `<td>${esc((g["期望"] || []).join("、")) || "—"}</td><td>${esc((g["引敘"] || []).join("、")) || "—"}</td></tr>`).join("") + "</tbody></table>";
+    h += '<details><summary>進階：直接編輯個人設定（JSON）</summary><p class="hint">可增修「常見錯別字」「疊字白名單」「詞界常見字」「台字例外」「公文用語」「計算關鍵字」。' +
+      "這裡只需寫要新增或變更的部分，會與內建設定逐項合併；把錯別字的建議寫法設為空字串即可停用該條。</p>" +
+      `<textarea id="cfgText">${esc(JSON.stringify(userConfig, null, 2))}</textarea><button id="cfgApply">套用</button></details>`;
+    $("cfgBox").innerHTML = h;
+
+    $("cfgBox").querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.onchange = () => {
+        userConfig["檢查項目"] = Object.assign({}, userConfig["檢查項目"], { [cb.dataset.k]: cb.checked });
+        saveUser(userConfig);
+      };
+    });
+    $("cfgExport").onclick = () => download(`公文校對工具設定-${stamp()}.json`,
+      new TextEncoder().encode(JSON.stringify(config(), null, 2)), "application/json");
+    $("cfgImport").onclick = () => $("cfgFile").click();
+    $("cfgFile").onchange = async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      try { setUser(JSON.parse(await f.text()), `已匯入「${f.name}」`); }
+      catch (_) { alert("設定檔格式不正確（需為 JSON）"); }
+    };
+    $("cfgReset").onclick = () => { if (confirm("確定要清除個人設定、還原為預設嗎？")) setUser({}, "已還原預設"); };
+    $("cfgApply").onclick = () => {
+      try { setUser(JSON.parse($("cfgText").value || "{}"), "已套用"); }
+      catch (_) { alert("格式不正確，請檢查 JSON 語法（例如引號、逗號）"); }
+    };
+  }
+
+  function setUser(u, msg) {
+    if (!u || typeof u !== "object" || Array.isArray(u)) return alert("設定格式不正確");
+    userConfig = u;
+    const saved = saveUser(u);
+    renderConfig(saved ? msg : msg + "（此瀏覽器無法記住設定，關閉後會恢復預設）");
+  }
+
+  renderConfig();
+})(globalThis.PT = globalThis.PT || {});
+
+</script>
+</body>
+</html>
